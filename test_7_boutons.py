@@ -7,7 +7,7 @@ Appuie sur chaque bouton pour voir. Ctrl+C pour quitter.
 import smbus2
 import time
 
-MCP2_ADDR  = 0x26
+MCP2_ADDR  = 0x24
 REG_IODIRB = 0x01
 REG_GPPUB  = 0x0D
 REG_GPIOB  = 0x13
