@@ -65,7 +65,7 @@ BOUTONS_ACTIFS_BAS = True
 
 # Durée d'activation du vérin de coupe après appui sur le bouton COUPE.
 # Passé ce délai la sortie retombe et le ressort ramène la lame.
-TEMPS_DECOUPE = 1.0
+TEMPS_DECOUPE = 0.75
 
 # Temps mort imposé entre la coupure d'une bobine du bistable et
 # l'alimentation de l'autre. Garantit qu'elles ne se recouvrent jamais.
