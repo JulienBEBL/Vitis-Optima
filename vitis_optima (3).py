@@ -1,4 +1,4 @@
-#T
+#Tisu
 import time      
 import sys    
 import signal    
@@ -45,8 +45,8 @@ BIT_BTN_INIT    = 2   # BP INSTALLATION (NO) ---- ok
 # CONFIGURATION OUTPUTS 
 
 # Voyants lumineux
-VOYANT_VERT_GPIO  = 22   # GPIO17 (pin 11) = PUL_1 → DRIVER1 → voyant vert (prêt)   ----- ok
-VOYANT_ROUGE_GPIO = 17   # GPIO27 (pin 13) = PUL_2 → DRIVER2 → voyant rouge (défaut)    ------ ok
+VOYANT_VERT_GPIO  = 22   # GPIO17 (pin 11) = PUL_1 → DRIVER1 → voyant vert (prêt)   ----- ok pul 8 
+VOYANT_ROUGE_GPIO = 17   # GPIO27 (pin 13) = PUL_2 → DRIVER2 → voyant rouge (défaut)    ------ ok pul 7
 
 # Relais 
 # RELAY_AIR_GPIO1   = 20   # GPIO20 (pin 38) → relais R_EV1  -----ok
