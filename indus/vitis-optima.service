@@ -1,0 +1,75 @@
+# ═══════════════════════════════════════════════════════════════════════
+#  vitis-optima.service
+#  Lancement automatique du pilotage machine au démarrage de la Raspberry Pi 5
+# ═══════════════════════════════════════════════════════════════════════
+#
+#  ── À ADAPTER AVANT INSTALLATION ──────────────────────────────────────
+#  Trois lignes dépendent de ton installation : User, WorkingDirectory et
+#  ExecStart. Les valeurs ci-dessous supposent :
+#      - utilisateur         : pi
+#      - dossier du projet   : /home/pi/Vitis-Optima/indus
+#  Vérifie avec :   whoami   et   pwd
+#
+#  ── INSTALLATION ──────────────────────────────────────────────────────
+#      sudo cp vitis-optima.service /etc/systemd/system/
+#      sudo systemctl daemon-reload
+#      sudo systemctl enable vitis-optima.service     # lancement au boot
+#      sudo systemctl start vitis-optima.service      # démarrage immédiat
+#
+#  ── EXPLOITATION ──────────────────────────────────────────────────────
+#      systemctl status vitis-optima.service          # état du service
+#      journalctl -u vitis-optima.service -f          # journal en direct
+#      journalctl -u vitis-optima.service -b          # journal depuis le boot
+#      sudo systemctl restart vitis-optima.service    # après modif de config.py
+#
+#  ── DÉSACTIVATION ─────────────────────────────────────────────────────
+#      sudo systemctl stop vitis-optima.service
+#      sudo systemctl disable vitis-optima.service
+#
+#  ⚠ Tant que le service tourne, il occupe le bus I2C et pilote les relais.
+#    Arrête-le avant de lancer un script de test à la main, sinon les deux
+#    programmes se disputeront les sorties.
+#
+# ═══════════════════════════════════════════════════════════════════════
+
+[Unit]
+Description=Vitis Optima — pilotage des vérins de mise en position et de coupe
+Documentation=file:///home/pi/Vitis-Optima/indus/config.py
+
+# Le service démarre une fois le système en état multi-utilisateur, donc
+# après la création de /dev/i2c-1 par udev. Si le bus n'était malgré tout
+# pas prêt, le Restart=on-failure ci-dessous rattrape le coup.
+After=multi-user.target
+
+[Service]
+Type=simple
+
+# L'utilisateur doit appartenir au groupe i2c pour accéder à /dev/i2c-1.
+# SupplementaryGroups l'ajoute au processus sans changer son groupe principal.
+User=pi
+SupplementaryGroups=i2c
+
+WorkingDirectory=/home/pi/Vitis-Optima/indus
+ExecStart=/usr/bin/python3 /home/pi/Vitis-Optima/indus/vitis_optima.py
+
+# Sans cette variable, la sortie du programme est bufferisée par blocs de 4 ko
+# et n'apparaît dans journalctl qu'avec un long retard.
+Environment=PYTHONUNBUFFERED=1
+
+# Redémarrage automatique si le programme se termine en erreur (perte du bus
+# I2C, exception). Pas de redémarrage s'il s'arrête normalement, pour que
+# `systemctl stop` reste efficace.
+Restart=on-failure
+RestartSec=5
+
+# À l'arrêt, systemd envoie SIGTERM : le programme remet toutes les sorties
+# à zéro puis se termine en quelques millisecondes. 10 s sont largement
+# suffisantes avant le SIGKILL.
+KillSignal=SIGTERM
+TimeoutStopSec=10
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
