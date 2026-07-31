@@ -1,3 +1,4 @@
+#T
 import time      
 import sys    
 import signal    
@@ -29,34 +30,37 @@ REG_OLATB  = 0x15   # écriture latch port B
 # CONFIGURATION RELAIS
 # Le relais 
 BIT_EV1_PRESSE = 2   # GPA2 to EV 5/2 (presse, V1) ------ GPIO 24  --- OK 
-BIT_EV2_COUPE  = 3   # GPA3 to EV 3/2 NF (coupe, V2) ------ GPIO 23   --- OK
+BIT_EV_COUPE_AVANT  = 3   # GPA1 → R_LED2 → relais → EV coupe chambre avant
+BIT_EV_COUPE_ARRIERE = 4   # GPA2 → R_LED3 → relais → EV coupe chambre arrière
+
 
 # CONFIGURATION INPUTS 
 # CAPTUREURS 
-BIT_CAPTEUR_1   = 0   # GPB0 (bornier VIC pin 1) 
+# BIT_CAPTEUR_1   = 0   # GPB0 (bornier VIC pin 1) ---- ok
 # BOUTONS
-BIT_BTN_CYCLE   = 2   # GPB2 (bornier VIC pin 3) — BP COUPE (NO)
-BIT_BTN_VALID   = 3   # GPB3 (bornier VIC pin 4) — BP RÉCUPÉRATION (NO)
-BIT_BTN_INIT    = 4   # GPB4 (bornier VIC pin 5) — BP INSTALLATION (NO)
+BIT_BTN_CYCLE   = 0   # BP PRESSE (NO) ---- ok
+BIT_BTN_VALID   = 1   # BP COUPE (NO) ---- ok
+BIT_BTN_INIT    = 2   # BP INSTALLATION (NO) ---- ok
 
 # CONFIGURATION OUTPUTS 
 
 # Voyants lumineux
-VOYANT_VERT_GPIO  = 17   # GPIO17 (pin 11) = PUL_1 → DRIVER1 → voyant vert (prêt)
-VOYANT_ROUGE_GPIO = 27   # GPIO27 (pin 13) = PUL_2 → DRIVER2 → voyant rouge (défaut)
+VOYANT_VERT_GPIO  = 22   # GPIO17 (pin 11) = PUL_1 → DRIVER1 → voyant vert (prêt)   ----- ok
+VOYANT_ROUGE_GPIO = 17   # GPIO27 (pin 13) = PUL_2 → DRIVER2 → voyant rouge (défaut)    ------ ok
 
 # Relais 
-RELAY_AIR_GPIO1   = 20   # GPIO20 (pin 38) → relais R_EV1
-RELAY_AIR_GPIO2 = 16   # GPIO16 (pin 36) → relais R_EV2
+# RELAY_AIR_GPIO1   = 20   # GPIO20 (pin 38) → relais R_EV1  -----ok
+# RELAY_AIR_GPIO2 = 16   # GPIO16 (pin 36) → relais R_EV2 ---- ok
 
 
 
 # TEMPS 
-TEMPS_SERRAGE   = 10.0   # durée déploiement V1 (presse)
+TEMPS_SERRAGE   = 10.0   # durée déploiement V1 (presse)    ---ok 
 TEMPS_DECOUPE   = 5.0    # durée V2 poussé (lame)
 TEMPS_RETOUR    = 0.5    # rétraction par ressort de rappel
 TIMEOUT_VALID   = 1.0   # timeout avant ouverture auto des presses
 ANTI_REBOND     = 0.05   # anti-rebond boutons (50 ms)
+
 
 
 # MCP23017 CLASS 
@@ -133,13 +137,11 @@ def init_hardware():
     GPIO.setwarnings(False)
 
     # Sorties GPIO 
-    GPIO.setup(VOYANT_VERT_GPIO,  GPIO.OUT, initial=GPIO.LOW)   # PUL_1 → DRIVER1
-    GPIO.setup(VOYANT_ROUGE_GPIO, GPIO.OUT, initial=GPIO.LOW)   # PUL_2 → DRIVER2
-    GPIO.setup(RELAY_AIR_GPIO2,  GPIO.OUT, initial=GPIO.LOW)   # relais pompe
-    GPIO.setup(RELAY_AIR_GPIO1,    GPIO.OUT, initial=GPIO.LOW)   # relais air
-    GPIO.setup(RELAY_AIR_GPIO2,    GPIO.OUT, initial=GPIO.LOW)   # relais air
-    GPIO.setup(BUZZER_GPIO,       GPIO.OUT, initial=GPIO.LOW)   # buzzer OFF
-
+    GPIO.setup(VOYANT_VERT_GPIO,  GPIO.OUT, initial=GPIO.LOW)   # PUL_8 → DRIVER1
+    GPIO.setup(VOYANT_ROUGE_GPIO, GPIO.OUT, initial=GPIO.LOW)   # PUL_7 → DRIVER2
+    GPIO.setup(BIT_EV1_PRESSE,    GPIO.OUT, initial=GPIO.LOW)   # relais ev1
+    GPIO.setup(BIT_EV_COUPE_AVANT,    GPIO.OUT, initial=GPIO.LOW)   # relais ev2
+    GPIO.setup(BIT_EV_COUPE_ARRIERE,    GPIO.OUT, initial=GPIO.LOW)   # relais ev2
     
     # MCP1 (0x24): sorties distributeurs 
     mcp1 = MCP23017(I2C_BUS_ID, MCP1_ADDR)
@@ -175,12 +177,22 @@ def ev1_presse(on):
 
 def ev2_coupe(on):
     """
-    EV2 (coupe / découpe)
+    EV2 (coupe)
     MCP1 → R_LED2 → 24V → EV 5/2 NF
     ON = air pousse V2 (lame descend). OFF = ressort rétracte (EV NF se ferme).
     """
-    mcp1.set_pin("A", BIT_EV2_COUPE, on)
+    mcp1.set_pin("A", BIT_EV_COUPE_AVANT, on)
     print(f"  [EV2] Coupe  → {'ON' if on else 'OFF'}")
+
+
+def ev3_coupe(on):
+    """
+    EV2 (découpe)
+    MCP1 → R_LED3 → 24V → EV 5/2 NF
+    ON = air pousse V2 (lame descend). OFF = ressort rétracte (EV NF se ferme).
+    """
+    mcp1.set_pin("A", BIT_EV_COUPE_ARRIERE, on)
+    print(f"  [EV3] Découpe  → {'ON' if on else 'OFF'}")
 
 def toutes_ev_off():
     """ EV1 + EV2 (off pour l'initialisation)."""
@@ -209,27 +221,27 @@ def voyant_rouge(on):
 
 # SORTIES: RELAIS 
 
-def air1(on):
+#def air1(on):
     """
     Relais d'electrovanne 1 pour PRESSE
     """
-    GPIO.output(RELAY_AIR_GPIO1, GPIO.HIGH if on else GPIO.LOW)
-    print(f"  [AIR] → {'ON' if on else 'OFF'}")
+    #GPIO.output(RELAY_AIR_GPIO, GPIO.HIGH if on else GPIO.LOW)
+    #print(f"  [AIR] → {'ON' if on else 'OFF'}")
 
 
-def air2(on):
+#def air2(on):
     """
     Relais d'electrovanne 2 pour COUPE
        """
-    GPIO.output(RELAY_AIR_GPIO2, GPIO.HIGH if on else GPIO.LOW)
-    print(f"  [POMPE] → {'ON' if on else 'OFF'}")
+    #GPIO.output(RELAY_AIR_GPIO2, GPIO.HIGH if on else GPIO.LOW)
+    #print(f"  [POMPE] → {'ON' if on else 'OFF'}")
 
 
 # ENTRÉES: CAPTEURS 
 
-def v2_en_haut():
+#def v2_en_haut():
     """True = V2 rétracté (lame en haut, capteur activé)."""
-    return not mcp2.read_pin("B", BIT_CAPTEUR_1)
+   # return not mcp2.read_pin("B", BIT_CAPTEUR_1)
 
 # ENTRÉES: BOUTONS 
 
@@ -259,8 +271,10 @@ def btn_init():
 def arret_securite():
     """Coupe tout immédiatement"""
     toutes_ev_off()
-    GPIO.output(RELAY_AIR_GPIO1, GPIO.LOW)
-    GPIO.output(RELAY_AIR_GPIO2, GPIO.LOW)
+    GPIO.output(BIT_EV1_PRESSE,    GPIO.OUT, initial=GPIO.LOW)   # relais ev1
+    
+    GPIO.output(BIT_EV_COUPE_AVANT,    GPIO.OUT, initial=GPIO.LOW)   # relais ev2
+    GPIO.output(BIT_EV_COUPE_ARRIERE , GPIO.OUT, initial=GPIO.LOW)    # relais ev2
     GPIO.output(VOYANT_VERT_GPIO, GPIO.LOW)
     GPIO.output(VOYANT_ROUGE_GPIO, GPIO.LOW)
     print("  [SÉCURITÉ] Tout OFF")
@@ -272,8 +286,16 @@ def cleanup():
     GPIO.cleanup()
     print("ARRET COMPLET")
 
+
+
+
+
 # -------------------------------------------------------------------------------------------------------------
 # LOGIQUE DE LA MACHINE 
+
+
+
+
 def etat_repos():
     """
     EV1 OFF, EV2 OFF. Air ON (prêt). Voyant vert ON.
@@ -284,8 +306,9 @@ def etat_repos():
     print("=" * 60)
 
     toutes_ev_off()
-    air2(True)
-    air1(True)
+    ev1_presse(False)
+    ev2_coupe(False)
+    ev3_coupe(False)
     voyant_vert(True)
     voyant_rouge(False)
 
@@ -329,6 +352,7 @@ def etat_serrage():
 
     # Phase 1 : déploiement V1
     ev1_presse(True)
+ 
     print(f"  → V1 serre ({TEMPS_SERRAGE}s)...")
 
     t0 = time.time()
@@ -376,11 +400,12 @@ def etat_decoupe():
 
     """
     print("\n" + "-" * 60)
-    print("DÉCOUPE")
+    print("COUPE")
     print("-" * 60)
 
     # Phase 1 : V2 descend
     ev2_coupe(True)
+    ev3_coupe(False)
     print(f" lame descend ({TEMPS_DECOUPE}s)...")
 
     t0 = time.time()
@@ -393,14 +418,12 @@ def etat_decoupe():
 
     # Phase 2 : V2 remonte (ressort de rappel)
     ev2_coupe(False)
+    ev3_coupe(True)
     print("EV2 OFF: ressort ramène V2")
 
     t0 = time.time()
     while True:
-        if v2_en_haut():
-            print(f" V2 revenu en {time.time() - t0:.2f}s : coupe finie !")
-            return True
-
+        
         if time.time() - t0 > TEMPS_RETOUR:
             print(f"  [DÉFAUT] V2 pas revenu après {TEMPS_RETOUR}s")
             ev1_presse(False)
@@ -413,6 +436,11 @@ def etat_decoupe():
             return False
 
         time.sleep(0.01)
+
+
+
+
+
 
 # -------------------------------------------------------------------------------------------------------------
 
@@ -441,17 +469,6 @@ def etat_fin():
                     time.sleep(0.01)
                 return
         time.sleep(0.01)
-
-
-
-
-
-
-
-
-
-
-
 
 
 # MAIN
