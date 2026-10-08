@@ -37,7 +37,7 @@ if poste == cfg.POSTE_MERE:
     axe = Axe(poste, materiel.puce, cfg.PUL_MERE, cfg.DIR_MERE, cfg.ENA_MERE, drivers)
 else:
     axe = Axe(poste, materiel.puce, cfg.PUL_FILLE, cfg.DIR_FILLE, cfg.ENA_FILLE, drivers)
-budget = round(cfg.MOTEUR_BUDGET_PAS * BUDGET_TEST_FACTEUR)
+budget = round(cfg.MOTEUR_BUDGET_PAS[poste] * BUDGET_TEST_FACTEUR)
 
 try:
     print(f"\n  Budget de mesure : {budget} pas "
@@ -61,8 +61,8 @@ try:
     print("\n  Résultat :")
     print(f"    course moyenne    : {moyenne:.0f} pas = {degres_moteur:.1f}° d'arbre moteur")
     print(f"    avec MOTEUR_REDUCTION = {cfg.MOTEUR_REDUCTION} → {moyenne / cfg.PAS_PAR_DEGRE:.1f}° d'axe")
-    print(f"\n    → dans config.py : MOTEUR_COURSE_DEGRES = {moyenne / cfg.PAS_PAR_DEGRE:.1f}")
-    print(f"      (actuellement {cfg.MOTEUR_COURSE_DEGRES}, soit {cfg.MOTEUR_COURSE_PAS} pas)")
+    print(f"\n    → dans config.py : MOTEUR_COURSE_DEGRES[{poste}] = {moyenne / cfg.PAS_PAR_DEGRE:.1f}")
+    print(f"      (actuellement {cfg.MOTEUR_COURSE_DEGRES[poste]}, soit {cfg.MOTEUR_COURSE_PAS[poste]} pas)")
     ecart = abs(mesures[cfg.POSITION_LIGATURAGE] - mesures[cfg.POSITION_COUPE])
     if ecart > cfg.MOTEUR_SURCOURSE_PAS + 10:
         print(f"\n    ⚠ aller et retour diffèrent de {ecart} pas : perte de pas, jeu mécanique,")

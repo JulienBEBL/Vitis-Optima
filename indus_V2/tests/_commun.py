@@ -112,7 +112,8 @@ def deplacer(axe, entrees, poste: str, cible: str, lent: bool, budget: int) -> t
     if capteur.brut:
         print(f"  Fin de course {cible} déjà active : aucun mouvement.")
         return 0, 0
-    direction = cfg.DIR_VERS_LIGATURAGE if cible == cfg.POSITION_LIGATURAGE else cfg.DIR_VERS_COUPE
+    direction = (cfg.DIR_VERS_LIGATURAGE if cible == cfg.POSITION_LIGATURAGE
+                 else cfg.DIR_VERS_COUPE)[poste]
     axe.preparer(direction)
     axe.lancer(budget, lent)
     pas_capteur = None

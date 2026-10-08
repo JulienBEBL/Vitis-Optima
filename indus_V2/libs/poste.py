@@ -216,7 +216,7 @@ class Poste:
             # (après un défaut D1). Avant ce relâchement, D4 borne le mouvement.
             if self._capteur_depart is not None and not self._budget_recale \
                     and not self._capteur_depart.brut:
-                self.axe.etendre_budget(self.axe.pas + cfg.MOTEUR_BUDGET_PAS)
+                self.axe.etendre_budget(self.axe.pas + cfg.MOTEUR_BUDGET_PAS[self.nom])
                 self._budget_recale = True
 
             # En marche : on attend la fin de course cible.
@@ -274,9 +274,10 @@ class Poste:
         self._capteur_depart = capteur_depart if capteur_depart.stable else None
         self._budget_recale = False
 
-        direction = cfg.DIR_VERS_LIGATURAGE if cible == cfg.POSITION_LIGATURAGE else cfg.DIR_VERS_COUPE
+        direction = (cfg.DIR_VERS_LIGATURAGE if cible == cfg.POSITION_LIGATURAGE
+                     else cfg.DIR_VERS_COUPE)[self.nom]
         self.axe.preparer(direction)
-        self.axe.lancer(cfg.MOTEUR_BUDGET_PAS, lent)
+        self.axe.lancer(cfg.MOTEUR_BUDGET_PAS[self.nom], lent)
         self.etat = OCCUPE_MOUVEMENT
         self._cible = cible
         self._arret_a = None

@@ -161,17 +161,15 @@ try:
         print("    les deux capteurs sont affectés au même galet.")
         raise SystemExit(1)
 
-    print(f"    DIR_VERS_COUPE      = {dir_coupe}"
-          + ("   ✓ comme config.py" if dir_coupe == cfg.DIR_VERS_COUPE else "   ← À CORRIGER dans config.py"))
-    print(f"    DIR_VERS_LIGATURAGE = {dir_ligaturage}"
-          + ("   ✓ comme config.py" if dir_ligaturage == cfg.DIR_VERS_LIGATURAGE
+    print(f"    DIR_VERS_LIGATURAGE[{poste}] = {dir_ligaturage}  (donc vers coupe = {dir_coupe})"
+          + ("   ✓ comme config.py" if dir_ligaturage == cfg.DIR_VERS_LIGATURAGE[poste]
              else "   ← À CORRIGER dans config.py"))
     degres_mesures = course / cfg.PAS_PAR_DEGRE
     print(f"    course mesurée      = {course} pas = {degres_mesures:.1f}° d'axe "
-          f"(config.py : {cfg.MOTEUR_COURSE_PAS} pas = {cfg.MOTEUR_COURSE_DEGRES}°)")
-    course_conforme = abs(course - cfg.MOTEUR_COURSE_PAS) <= cfg.MOTEUR_MARGE_PAS
+          f"(config.py : {cfg.MOTEUR_COURSE_PAS[poste]} pas = {cfg.MOTEUR_COURSE_DEGRES[poste]}°)")
+    course_conforme = abs(course - cfg.MOTEUR_COURSE_PAS[poste]) <= cfg.MOTEUR_MARGE_PAS
     if not course_conforme:
-        print(f"    ← À CORRIGER : MOTEUR_COURSE_DEGRES = {degres_mesures:.1f}")
+        print(f"    ← À CORRIGER : MOTEUR_COURSE_DEGRES[{poste}] = {degres_mesures:.1f}")
         print("      (mesure faite à la main, moteur relâché entre les coups : à quelques pas près ;")
         print("       test_6_course.py donne une mesure plus fine)")
 
@@ -181,7 +179,7 @@ try:
         raise SystemExit("  Auto-test non lancé.")
 
     # Le test utilise le sens qu'il vient de trouver, sans attendre la correction de config.py.
-    cfg.DIR_VERS_COUPE, cfg.DIR_VERS_LIGATURAGE = dir_coupe, dir_ligaturage
+    cfg.DIR_VERS_COUPE[poste], cfg.DIR_VERS_LIGATURAGE[poste] = dir_coupe, dir_ligaturage
     budget = course + cfg.MOTEUR_MARGE_PAS + cfg.MOTEUR_SURCOURSE_PAS
     cible = COUPE if etat[LIGATURAGE] else LIGATURAGE
     series = [("lent", True, ALLERS_RETOURS_LENTS)]
@@ -195,8 +193,8 @@ try:
     detail = {}              # (mode, cible) → [(pas au galet, pas à l'arrêt, durée)]
     for nom, lent, nombre in series:
         if nom == "profil":
-            print(f"    profil : {cfg.MOTEUR_VITESSE_MAX_SPS:.0f} pas/s max "
-                  f"({cfg.MOTEUR_VITESSE_MAX_SPS / cfg.PAS_PAR_DEGRE:.0f}°/s), approche "
+            print(f"    profil : pointe {cfg.MOTEUR_VITESSE_POINTE_SPS[poste]:.0f} pas/s "
+                  f"({cfg.MOTEUR_VITESSE_POINTE_SPS[poste] / cfg.PAS_PAR_DEGRE:.0f}°/s), approche "
                   f"{cfg.MOTEUR_VITESSE_APPROCHE_SPS:.0f} pas/s")
         for _ in range(2 * nombre):
             debut = time.monotonic()
@@ -222,7 +220,8 @@ try:
           f"rampes {'en S' if cfg.MOTEUR_RAMPES_EN_S else 'droites'}")
     print(f"  │ DIR vers coupe = {dir_coupe}, DIR vers ligaturage = {dir_ligaturage}, "
           f"course au recalage manuel = {course} pas")
-    print(f"  │ profil : max {cfg.MOTEUR_VITESSE_MAX_SPS:.0f} pas/s, approche "
+    print(f"  │ profil : pointe {cfg.MOTEUR_VITESSE_POINTE_SPS[poste]:.0f} pas/s "
+          f"(max demandé {cfg.MOTEUR_VITESSE_MAX_SPS:.0f}), approche "
           f"{cfg.MOTEUR_VITESSE_APPROCHE_SPS:.0f} pas/s, accél. {cfg.MOTEUR_ACCEL_SPS2:.0f}, "
           f"décél. {cfg.MOTEUR_DECEL_SPS2:.0f} pas/s²")
     print("  │")

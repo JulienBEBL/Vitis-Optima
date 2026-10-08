@@ -35,17 +35,18 @@ from libs.materiel import ENA_TOUS_LIBRES, PORT_A, PORT_B, Mcp23017
 log = logging.getLogger("vitis")
 
 
-def _vitesse_profil(pas: int) -> float:
-    """Consigne de vitesse (pas/s) du profil normal, au pas numéro `pas`."""
+def _vitesse_profil(poste: str, pas: int) -> float:
+    """Consigne de vitesse (pas/s) du profil normal de l'axe `poste`, au pas numéro `pas`."""
     v_app = cfg.MOTEUR_VITESSE_APPROCHE_SPS
-    v_max = cfg.MOTEUR_VITESSE_MAX_SPS
-    fin_decel = cfg.MOTEUR_FIN_DECEL_PAS
+    v_max = cfg.MOTEUR_VITESSE_POINTE_SPS[poste]      # < VITESSE_MAX si la course est courte
+    fin_decel = cfg.MOTEUR_FIN_DECEL_PAS[poste]
+    accel_pas, decel_pas = cfg.MOTEUR_ACCEL_PAS[poste], cfg.MOTEUR_DECEL_PAS[poste]
     if pas >= fin_decel:
         return v_app
-    if pas < cfg.MOTEUR_ACCEL_PAS:
-        avancement, acceleration, longueur = pas, cfg.MOTEUR_ACCEL_SPS2, cfg.MOTEUR_ACCEL_PAS
-    elif pas >= fin_decel - cfg.MOTEUR_DECEL_PAS:
-        avancement, acceleration, longueur = fin_decel - pas, cfg.MOTEUR_DECEL_SPS2, cfg.MOTEUR_DECEL_PAS
+    if pas < accel_pas:
+        avancement, acceleration, longueur = pas, cfg.MOTEUR_ACCEL_SPS2, accel_pas
+    elif pas >= fin_decel - decel_pas:
+        avancement, acceleration, longueur = fin_decel - pas, cfg.MOTEUR_DECEL_SPS2, decel_pas
     else:
         return v_max
     if cfg.MOTEUR_RAMPES_EN_S:
@@ -57,9 +58,12 @@ def _vitesse_profil(pas: int) -> float:
     return min(v, v_max)
 
 
-# Périodes du profil normal, calculées une fois : le thread ne fait qu'une
-# lecture de tableau par pas. Au-delà du tableau : vitesse d'approche.
-PERIODES_PROFIL = tuple(1.0 / _vitesse_profil(i) for i in range(cfg.MOTEUR_FIN_DECEL_PAS))
+# Périodes du profil normal de chaque axe (les courses diffèrent), calculées
+# une fois : le thread ne fait qu'une lecture de tableau par pas. Au-delà du
+# tableau : vitesse d'approche.
+PERIODES_PROFIL = {poste: tuple(1.0 / _vitesse_profil(poste, i)
+                                for i in range(cfg.MOTEUR_FIN_DECEL_PAS[poste]))
+                   for poste in cfg.POSTES}
 PERIODE_APPROCHE = 1.0 / cfg.MOTEUR_VITESSE_APPROCHE_SPS
 
 
@@ -126,7 +130,7 @@ class Axe:
         self._surcourse = None
         self.pas = 0
         self.erreur = None
-        periodes = () if lent else PERIODES_PROFIL
+        periodes = () if lent else PERIODES_PROFIL[self.poste]
         periode_lente = 1.0 / vitesse_lente_sps if vitesse_lente_sps else PERIODE_APPROCHE
         self._thread = threading.Thread(target=self._impulsions, args=(periodes, periode_lente),
                                         name=f"impulsions_{self.poste}", daemon=True)

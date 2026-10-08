@@ -222,11 +222,12 @@ ENA_MOTEUR_LIBRE = 1     # arbre libre
 # pull-down force 0 : les HUIT drivers sont excités dès la mise sous tension.
 # Le programme écrit ENA = 1 sur les huit dès l'ouverture du bus.
 
-# ── Sémantique DIR ────────────────────────────────────────────────────────
-# ⚠ SENS À CONFIRMER (test_5_moteur.py) : si l'axe part du mauvais côté,
-#   échanger ces deux valeurs.
-DIR_VERS_COUPE = 0
-DIR_VERS_LIGATURAGE = 1
+# ── Sémantique DIR — PAR AXE ──────────────────────────────────────────────
+# Les deux axes sont montés en miroir : le même niveau de DIR les fait tourner
+# en sens opposés par rapport à leurs fins de course. Relevé sur machine le
+# 2026-10-08 (test_5_moteur.py). Si un axe part du mauvais côté, inverser SA valeur.
+DIR_VERS_LIGATURAGE = {POSTE_MERE: 0, POSTE_FILLE: 1}
+DIR_VERS_COUPE = {poste: 1 - niveau for poste, niveau in DIR_VERS_LIGATURAGE.items()}
 
 # Séquence avant chaque mouvement : ENA → pause → DIR → pause → impulsions.
 # Ces deux pauses sont les seules attentes bloquantes de la boucle principale.
@@ -254,12 +255,17 @@ MOTEUR_MAINTIEN_EN_POSITION = False
 DRIVER_PAS_PAR_TOUR = 1600
 
 MOTEUR_REDUCTION = 1.0         # ⚠ À DÉTERMINER — rapport moteur → axe (> 1 si réducteur)
-MOTEUR_COURSE_DEGRES = 90.0    # ⚠ À DÉTERMINER (test_6_course.py) — écart COUPE ↔ LIGATURAGE, degrés d'axe
+# Course COUPE ↔ LIGATURAGE de CHAQUE axe, en degrés d'axe. Relevé sur machine
+# le 2026-10-08 (test_5_moteur.py : 197–199 pas pour la mère, 531–532 pour la
+# fille, à 1600 pas/tr). ⚠ Les deux courses sont très différentes : à confirmer
+# que c'est voulu mécaniquement.
+MOTEUR_COURSE_DEGRES = {POSTE_MERE: 44.5, POSTE_FILLE: 119.5}
 
 # Les nombres de pas sont CALCULÉS, jamais saisis : ajuster la course ou la
 # réduction ne demande de toucher qu'une ligne.
 PAS_PAR_DEGRE = DRIVER_PAS_PAR_TOUR * MOTEUR_REDUCTION / 360.0
-MOTEUR_COURSE_PAS = round(PAS_PAR_DEGRE * MOTEUR_COURSE_DEGRES)
+MOTEUR_COURSE_PAS = {poste: round(PAS_PAR_DEGRE * degres)
+                     for poste, degres in MOTEUR_COURSE_DEGRES.items()}
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -320,11 +326,37 @@ MOTEUR_DEGAGEMENT_MAX_PAS = round(PAS_PAR_DEGRE * MOTEUR_DEGAGEMENT_MAX_DEG)
 # En S, la rampe est π/2 fois plus longue : c'est ce qui garde la même
 # accélération de POINTE que la rampe droite.
 _ALLONGEMENT_RAMPE = math.pi / 2 if MOTEUR_RAMPES_EN_S else 1.0
-MOTEUR_ACCEL_PAS = math.ceil((MOTEUR_VITESSE_MAX_SPS ** 2 - MOTEUR_VITESSE_APPROCHE_SPS ** 2)
-                             / (2 * MOTEUR_ACCEL_SPS2) * _ALLONGEMENT_RAMPE)
-MOTEUR_DECEL_PAS = math.ceil((MOTEUR_VITESSE_MAX_SPS ** 2 - MOTEUR_VITESSE_APPROCHE_SPS ** 2)
-                             / (2 * MOTEUR_DECEL_SPS2) * _ALLONGEMENT_RAMPE)
-MOTEUR_FIN_DECEL_PAS = MOTEUR_COURSE_PAS - MOTEUR_APPROCHE_PAS
+_ACCEL_PAS_NOMINAL = math.ceil((MOTEUR_VITESSE_MAX_SPS ** 2 - MOTEUR_VITESSE_APPROCHE_SPS ** 2)
+                               / (2 * MOTEUR_ACCEL_SPS2) * _ALLONGEMENT_RAMPE)
+_DECEL_PAS_NOMINAL = math.ceil((MOTEUR_VITESSE_MAX_SPS ** 2 - MOTEUR_VITESSE_APPROCHE_SPS ** 2)
+                               / (2 * MOTEUR_DECEL_SPS2) * _ALLONGEMENT_RAMPE)
+
+
+def _profil_axe(course_pas: int) -> tuple:
+    """(fin de décélération, pas d'accélération, pas de décélération, vitesse de pointe).
+
+    Sur une course trop courte pour atteindre MOTEUR_VITESSE_MAX_SPS, les deux
+    rampes sont raccourcies dans la même proportion et la vitesse de pointe
+    baisse d'autant : les accélérations restent celles demandées, l'axe ne
+    fait simplement pas de palier.
+    """
+    fin_decel = course_pas - MOTEUR_APPROCHE_PAS
+    accel, decel, pointe = _ACCEL_PAS_NOMINAL, _DECEL_PAS_NOMINAL, MOTEUR_VITESSE_MAX_SPS
+    if 0 < fin_decel < accel + decel:
+        part = fin_decel / (accel + decel)
+        accel = int(accel * part)
+        decel = fin_decel - accel
+        pointe = math.sqrt(MOTEUR_VITESSE_APPROCHE_SPS ** 2
+                           + (MOTEUR_VITESSE_MAX_SPS ** 2 - MOTEUR_VITESSE_APPROCHE_SPS ** 2) * part)
+    return fin_decel, accel, decel, pointe
+
+
+# Par axe : poste → valeur.
+_PROFILS = {poste: _profil_axe(pas) for poste, pas in MOTEUR_COURSE_PAS.items()}
+MOTEUR_FIN_DECEL_PAS = {poste: profil[0] for poste, profil in _PROFILS.items()}
+MOTEUR_ACCEL_PAS = {poste: profil[1] for poste, profil in _PROFILS.items()}
+MOTEUR_DECEL_PAS = {poste: profil[2] for poste, profil in _PROFILS.items()}
+MOTEUR_VITESSE_POINTE_SPS = {poste: profil[3] for poste, profil in _PROFILS.items()}
 
 # BUDGET DE PAS — borne DURE de chaque mouvement, référencement compris. Le
 # thread d'impulsions s'arrête de lui-même au dernier pas autorisé. Il est
@@ -332,7 +364,7 @@ MOTEUR_FIN_DECEL_PAS = MOTEUR_COURSE_PAS - MOTEUR_APPROCHE_PAS
 # recherche lente) : la cible peut donc être dépassée d'au plus MOTEUR_MARGE_DEG,
 # où que l'axe ait démarré derrière son galet. Avant ce relâchement, c'est
 # MOTEUR_DEGAGEMENT_MAX_DEG (défaut D4) qui borne le mouvement.
-MOTEUR_BUDGET_PAS = MOTEUR_COURSE_PAS + MOTEUR_MARGE_PAS
+MOTEUR_BUDGET_PAS = {poste: pas + MOTEUR_MARGE_PAS for poste, pas in MOTEUR_COURSE_PAS.items()}
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -503,13 +535,16 @@ def verifier_config() -> None:
     _distincts("ENA (0x25 B)", {"ENA_MERE": ENA_MERE, "ENA_FILLE": ENA_FILLE})
 
     # ── Niveaux logiques
-    for nom, val in (("ENA_MOTEUR_EXCITE", ENA_MOTEUR_EXCITE), ("ENA_MOTEUR_LIBRE", ENA_MOTEUR_LIBRE),
-                     ("DIR_VERS_COUPE", DIR_VERS_COUPE), ("DIR_VERS_LIGATURAGE", DIR_VERS_LIGATURAGE)):
+    for nom, val in (("ENA_MOTEUR_EXCITE", ENA_MOTEUR_EXCITE), ("ENA_MOTEUR_LIBRE", ENA_MOTEUR_LIBRE)):
         _dans(nom, val, {0, 1})
     if ENA_MOTEUR_EXCITE == ENA_MOTEUR_LIBRE:
         erreurs.append("ENA_MOTEUR_EXCITE et ENA_MOTEUR_LIBRE identiques")
-    if DIR_VERS_COUPE == DIR_VERS_LIGATURAGE:
-        erreurs.append("DIR_VERS_COUPE et DIR_VERS_LIGATURAGE identiques")
+    for nom, table in (("DIR_VERS_LIGATURAGE", DIR_VERS_LIGATURAGE),
+                       ("MOTEUR_COURSE_DEGRES", MOTEUR_COURSE_DEGRES)):
+        if set(table) != set(POSTES):
+            erreurs.append(f"{nom} : une valeur par poste attendue ({POSTES}), trouvé {sorted(table)}")
+    for poste, niveau in DIR_VERS_LIGATURAGE.items():
+        _dans(f"DIR_VERS_LIGATURAGE[{poste}]", niveau, {0, 1})
 
     # ── GPIO : aucune broche en double
     gpio = [PUL_MERE, PUL_FILLE, BUZZER_GPIO, *GPIO_RELAIS_LIBRES]
@@ -534,7 +569,7 @@ def verifier_config() -> None:
         ("TOLERANCE_PERTE_CAPTEUR_S", TOLERANCE_PERTE_CAPTEUR_S),
         ("DRIVER_PAS_PAR_TOUR", DRIVER_PAS_PAR_TOUR),
         ("MOTEUR_REDUCTION", MOTEUR_REDUCTION),
-        ("MOTEUR_COURSE_DEGRES", MOTEUR_COURSE_DEGRES),
+        *((f"MOTEUR_COURSE_DEGRES[{poste}]", degres) for poste, degres in MOTEUR_COURSE_DEGRES.items()),
         ("MOTEUR_VITESSE_MAX_SPS", MOTEUR_VITESSE_MAX_SPS),
         ("MOTEUR_VITESSE_APPROCHE_SPS", MOTEUR_VITESSE_APPROCHE_SPS),
         ("MOTEUR_ACCEL_SPS2", MOTEUR_ACCEL_SPS2),
@@ -569,17 +604,15 @@ def verifier_config() -> None:
         erreurs.append("MOTEUR_VITESSE_APPROCHE_SPS > MOTEUR_VITESSE_MAX_SPS")
     if MOTEUR_LARGEUR_IMPULSION_US * 1e-6 >= 0.5 / MOTEUR_VITESSE_MAX_SPS:
         erreurs.append("MOTEUR_LARGEUR_IMPULSION_US trop grand pour MOTEUR_VITESSE_MAX_SPS")
-    if MOTEUR_FIN_DECEL_PAS <= 0:
-        erreurs.append("MOTEUR_DISTANCE_APPROCHE_DEG >= MOTEUR_COURSE_DEGRES")
-    elif MOTEUR_ACCEL_PAS + MOTEUR_DECEL_PAS > MOTEUR_FIN_DECEL_PAS:
-        erreurs.append(
-            f"profil impossible : accélération {MOTEUR_ACCEL_PAS} pas + décélération "
-            f"{MOTEUR_DECEL_PAS} pas > {MOTEUR_FIN_DECEL_PAS} pas disponibles avant l'approche "
-            f"— augmenter MOTEUR_ACCEL_SPS2 / MOTEUR_DECEL_SPS2 ou baisser MOTEUR_VITESSE_MAX_SPS")
+    for poste in POSTES:
+        # Une course trop courte pour atteindre la vitesse max n'est pas une
+        # erreur : _profil_axe() raccourcit les rampes et baisse la pointe.
+        if MOTEUR_FIN_DECEL_PAS.get(poste, 1) <= 0:
+            erreurs.append(f"{poste} : MOTEUR_DISTANCE_APPROCHE_DEG >= course de l'axe")
+        if MOTEUR_DEGAGEMENT_MAX_PAS >= MOTEUR_COURSE_PAS.get(poste, MOTEUR_DEGAGEMENT_MAX_PAS + 1):
+            erreurs.append(f"{poste} : MOTEUR_DEGAGEMENT_MAX_DEG >= course de l'axe")
     if MOTEUR_SURCOURSE_PAS >= MOTEUR_MARGE_PAS:
         erreurs.append("MOTEUR_SURCOURSE_DEG >= MOTEUR_MARGE_DEG — la surcourse doit tenir dans la marge")
-    if MOTEUR_DEGAGEMENT_MAX_PAS >= MOTEUR_COURSE_PAS:
-        erreurs.append("MOTEUR_DEGAGEMENT_MAX_DEG >= MOTEUR_COURSE_DEGRES")
     # D4 ne doit pas se déclencher à tort quand l'axe part de loin derrière son
     # galet (après un D1) : marge + surcourse + pas parcourus pendant le retard
     # de l'anti-rebond à vitesse max.
