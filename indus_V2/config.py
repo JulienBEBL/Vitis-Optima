@@ -246,10 +246,12 @@ MOTEUR_MAINTIEN_EN_POSITION = False
 #  MOTEURS — GÉOMÉTRIE
 # ═══════════════════════════════════════════════════════════════════════════
 
-# ⚠ À CONFIRMER SUR L'ÉTIQUETTE DU DRIVER. L'ancienne config lisait
-#   SW5..SW8 = OFF/OFF/ON/ON → 3200 pas/tr ; V4 lit SW5..SW8 = ON/ON/ON/ON →
-#   400 pas/tr. Deux tables différentes. Toute la géométrie en dépend.
-DRIVER_PAS_PAR_TOUR = 3200
+# DOIT correspondre aux interrupteurs SW5..SW8 des deux drivers (manuel
+# JK-DM860H) : 1600 pas/tr = ON/OFF/ON/ON. Toute la géométrie en dépend : avec
+# un écart, l'axe parcourt une autre course que celle calculée.
+# 1600 plutôt que 3200 : la position vient des fins de course, pas du compte de
+# pas, et à fréquence d'impulsions égale l'axe va deux fois plus vite.
+DRIVER_PAS_PAR_TOUR = 1600
 
 MOTEUR_REDUCTION = 1.0         # ⚠ À DÉTERMINER — rapport moteur → axe (> 1 si réducteur)
 MOTEUR_COURSE_DEGRES = 90.0    # ⚠ À DÉTERMINER (test_6_course.py) — écart COUPE ↔ LIGATURAGE, degrés d'axe
@@ -419,15 +421,18 @@ COMPTEURS_PERIODE_ECRITURE_S = 30.0
 # ═══════════════════════════════════════════════════════════════════════════
 #  DRIVERS JK-DM860H — RÉGLAGES PHYSIQUES  (documentation, aucune dépendance code)
 # ═══════════════════════════════════════════════════════════════════════════
-# DIP cible : 11010011
-#   SW1=ON  SW2=ON  SW3=OFF        → courant (voir ci-dessous)
-#   SW4=OFF                        → courant de repos réduit de moitié (thermique IP65)
-#   SW5=OFF SW6=OFF SW7=ON SW8=ON  → 3200 impulsions/tour  ⚠ voir DRIVER_PAS_PAR_TOUR
-DRIVER_DIP_SWITCH = "11010011"
+# Réglage des DEUX drivers, SW1 → SW8 (1 = ON), d'après le manuel JK-DM860H :
+#   SW1=ON  SW2=ON  SW3=OFF        → 4,28 A RMS / 5,14 A crête
+#   SW4=OFF                        → demi-courant à l'arrêt
+#   SW5=ON  SW6=OFF SW7=ON SW8=ON  → 1600 impulsions/tour (= DRIVER_PAS_PAR_TOUR)
+DRIVER_DIP_SWITCH = "11001011"
 
-# ⚠ À CONFIRMER APRÈS MESURE DE TEMPÉRATURE : le moteur est donné à 6,0 A.
-#     ON/ON/OFF  → 5,14 A crête / 4,28 A RMS  (plus de couple) — valeur actuelle
-#     OFF/OFF/ON → 4,45 A crête / 3,71 A RMS  (conservateur)
+# ⚠ À CONFIRMER : courant nominal sur la plaque du moteur (noté 6,0 A / phase).
+#   Crans SW1/SW2/SW3 du manuel :
+#     OFF/OFF/ON  → 3,71 A RMS / 4,45 A crête  (si ça chauffe et que le couple suffit)
+#     ON/ON/OFF   → 4,28 A RMS / 5,14 A crête  (valeur actuelle, ~70 % de 6 A)
+#     OFF/ON/OFF  → 4,86 A RMS / 5,83 A crête  (si l'axe décroche)
+#     OFF/OFF/OFF → 6,00 A RMS / 7,20 A crête  (maximum, moteur de 6 A seulement)
 DRIVER_COURANT_CRETE_A = 5.14
 
 # Ce driver n'a PAS de sortie d'alarme : une panne n'est signalée que par sa

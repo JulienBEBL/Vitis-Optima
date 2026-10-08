@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+indus_V2/logs/
+indus_V2/etat/

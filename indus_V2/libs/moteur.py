@@ -108,8 +108,11 @@ class Axe:
         self._ports.ecrire_dir(self._bit_dir, direction)
         time.sleep(cfg.MOTEUR_DIR_AVANT_PAS_S)
 
-    def lancer(self, budget: int, lent: bool) -> None:
-        """Démarre le thread d'impulsions. `lent` : tout le trajet à vitesse d'approche."""
+    def lancer(self, budget: int, lent: bool, vitesse_lente_sps: float | None = None) -> None:
+        """Démarre le thread d'impulsions. `lent` : tout le trajet à vitesse d'approche.
+
+        `vitesse_lente_sps` remplace la vitesse d'approche pour ce mouvement
+        (scripts de test : déplacement manuel très lent)."""
         if self.en_marche:
             raise RuntimeError(f"axe {self.poste} : thread d'impulsions déjà en marche")
         self._arret.clear()
@@ -118,7 +121,8 @@ class Axe:
         self.pas = 0
         self.erreur = None
         periodes = () if lent else PERIODES_PROFIL
-        self._thread = threading.Thread(target=self._impulsions, args=(periodes,),
+        periode_lente = 1.0 / vitesse_lente_sps if vitesse_lente_sps else PERIODE_APPROCHE
+        self._thread = threading.Thread(target=self._impulsions, args=(periodes, periode_lente),
                                         name=f"impulsions_{self.poste}", daemon=True)
         self._thread.start()
 
@@ -151,7 +155,7 @@ class Axe:
 
     # ── Côté thread d'impulsions ──────────────────────────────────────────
 
-    def _impulsions(self, periodes: tuple) -> None:
+    def _impulsions(self, periodes: tuple, periode_lente: float) -> None:
         largeur_s = cfg.MOTEUR_LARGEUR_IMPULSION_US * 1e-6
         reste = None
         t_prochain = time.perf_counter()
@@ -177,7 +181,7 @@ class Axe:
                 t_pas = time.perf_counter()
                 self.pas += 1
 
-                periode = periodes[self.pas] if self.pas < len(periodes) else PERIODE_APPROCHE
+                periode = periodes[self.pas] if self.pas < len(periodes) else periode_lente
                 # Échéance comptée depuis le pas RÉELLEMENT émis : un retard (GIL,
                 # ordonnanceur) ralentit le moteur, il ne provoque jamais de rafale.
                 t_prochain = t_pas + periode

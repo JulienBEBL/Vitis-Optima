@@ -1,36 +1,54 @@
 # -*- coding: utf-8 -*-
 """
-test_5_moteur.py — Un axe : bon moteur, bon sens, arrêt sur fin de course, profil.
+test_5_moteur.py — Recalage assisté d'un axe, puis auto-test sur les fins de course.
 
 ⚠ CE TEST FAIT TOURNER UN MOTEUR. Arrêt d'urgence à portée de main.
-   Faire d'abord test_3_capteurs.py : l'arrêt dépend des fins de course.
+   Tests 2 et 3 validés d'abord : l'arrêt dépend des fins de course.
 
     python3 tests/test_5_moteur.py
 
-Étapes, toutes confirmées au clavier :
-  1. SENS — quelques degrés à vitesse lente, sans fin de course.
-       Vérifie que c'est LE BON AXE qui tourne (sinon PUL / DIR / ENA mal
-       affectés : DIR_MERE, DIR_FILLE, ENA_*, PUL_* dans config.py) et qu'il
-       part DU BON CÔTÉ (sinon échanger DIR_VERS_COUPE / DIR_VERS_LIGATURAGE).
-  2. COURSE LENTE — jusqu'à la fin de course opposée, à vitesse d'approche.
-  3. COURSE AU PROFIL — aller-retour avec accélération, palier, décélération.
-       Pour régler MOTEUR_VITESSE_MAX_SPS / ACCEL / DECEL : monter
-       progressivement jusqu'au décrochage (bruit, perte de pas), puis
-       redescendre d'environ 30 %.
+PHASE 1 — RECALAGE ASSISTÉ (toi au clavier, très lentement)
+  Tu fais tourner l'axe par petits coups, dans un sens ou dans l'autre :
+      a = petit coup, DIR à 0        z = petit coup, DIR à 1
+      A = grand coup, DIR à 0        Z = grand coup, DIR à 1
+      s = état des fins de course    q = quitter
+  Chaque coup s'arrête tout seul dès qu'une fin de course de l'axe s'active.
+  But : amener l'axe sur une fin de course, puis sur l'autre. Le script note
+  avec quel niveau de DIR chaque fin de course a été atteinte, et compte les
+  pas entre les deux.
 
-Tout mouvement est borné par MOTEUR_BUDGET_PAS. Ctrl+C arrête le moteur.
+  Au premier coup, vérifier que c'est LE BON AXE qui tourne. Sinon : q, et
+  revoir DIR_MERE / DIR_FILLE, ENA_*, PUL_* dans config.py.
+
+PHASE 2 — RÉSULTAT
+  Le script en déduit DIR_VERS_COUPE / DIR_VERS_LIGATURAGE et la course
+  mesurée, les compare à config.py et affiche les lignes à corriger.
+
+PHASE 3 — AUTO-TEST (lui tout seul, après ton accord)
+  Allers-retours entre les deux fins de course, d'abord lents, puis au profil
+  (accélération, palier, décélération) si la course mesurée correspond à
+  config.py. Il utilise le sens qu'il vient de trouver, même si config.py
+  n'est pas encore corrigé. Chaque trajet est borné en pas.
+
+Ctrl+C arrête le moteur à tout moment.
 """
 
 import time
 
 import _commun
-from _commun import attendre_entree, cfg, confirmer, deplacer, pas_a_vide, question, titre
+from _commun import cfg, confirmer, deplacer, question, titre, voyant
 from libs.entrees import Entrees
 from libs.moteur import Axe, PortsDrivers
 
-DEGRES_TEST_SENS = 5.0     # amplitude de l'étape 1, degrés d'axe
+VITESSE_JOG_DEG_S = 10.0     # vitesse des coups manuels, degrés d'axe par seconde
+PETIT_COUP_DEG = 2.0
+GRAND_COUP_DEG = 15.0
+ALLERS_RETOURS_LENTS = 1
+ALLERS_RETOURS_PROFIL = 3
 
-titre("TEST 5 — MOTEUR")
+COUPE, LIGATURAGE = cfg.POSITION_COUPE, cfg.POSITION_LIGATURAGE
+
+titre("TEST 5 — MOTEUR : RECALAGE ASSISTÉ + AUTO-TEST")
 choix = question("Axe à tester : m = mère, f = fille ?")
 poste = cfg.POSTE_MERE if choix == "m" else cfg.POSTE_FILLE if choix == "f" else None
 if poste is None:
@@ -43,67 +61,162 @@ if poste == cfg.POSTE_MERE:
     axe = Axe(poste, materiel.puce, cfg.PUL_MERE, cfg.DIR_MERE, cfg.ENA_MERE, drivers)
 else:
     axe = Axe(poste, materiel.puce, cfg.PUL_FILLE, cfg.DIR_FILLE, cfg.ENA_FILLE, drivers)
+capteurs = {COUPE: entrees.capteur(poste, COUPE), LIGATURAGE: entrees.capteur(poste, LIGATURAGE)}
 
 
-def position_lue() -> str | None:
-    for _ in range(10):                       # remplit l'anti-rebond
+def lire_capteurs() -> dict:
+    """État stable des deux fins de course de l'axe (anti-rebond rempli)."""
+    for _ in range(12):
         entrees.rafraichir(time.monotonic())
         time.sleep(cfg.PERIODE_BOUCLE_S)
-    coupe = entrees.capteur(poste, cfg.POSITION_COUPE).stable
-    lig = entrees.capteur(poste, cfg.POSITION_LIGATURAGE).stable
-    if coupe and lig:
-        raise SystemExit("  ⚠ les deux fins de course sont actives (défaut D2) — voir test_3")
-    return cfg.POSITION_COUPE if coupe else cfg.POSITION_LIGATURAGE if lig else None
+    return {position: capteur.stable for position, capteur in capteurs.items()}
 
 
-def opposee(position: str) -> str:
-    return cfg.POSITION_LIGATURAGE if position == cfg.POSITION_COUPE else cfg.POSITION_COUPE
+def afficher_capteurs(etat: dict) -> None:
+    print(f"    fins de course {poste} :  COUPE {voyant(etat[COUPE])}   LIGATURAGE {voyant(etat[LIGATURAGE])}")
+
+
+def coup(niveau_dir: int, degres: float, actifs_avant: dict) -> tuple:
+    """Un coup manuel très lent. S'arrête sur toute fin de course de l'axe qui
+    n'était pas active au départ. Renvoie (pas effectués, pas à la détection,
+    position atteinte ou None)."""
+    nombre = max(1, round(cfg.PAS_PAR_DEGRE * degres))
+    axe.preparer(niveau_dir)
+    axe.lancer(nombre, lent=True, vitesse_lente_sps=VITESSE_JOG_DEG_S * cfg.PAS_PAR_DEGRE)
+    atteinte, pas_detection = None, None
+    try:
+        while axe.en_marche:
+            entrees.rafraichir(time.monotonic())
+            if atteinte is None:
+                for position, capteur in capteurs.items():
+                    if not actifs_avant[position] and capteur.consecutifs >= cfg.CAPTEUR_LECTURES_ARRET:
+                        atteinte, pas_detection = position, axe.pas
+                        axe.demander_arret_apres(cfg.MOTEUR_SURCOURSE_PAS)
+            time.sleep(cfg.PERIODE_BOUCLE_S)
+    finally:
+        axe.demander_arret()
+        axe.attendre_fin(cfg.ARRET_THREAD_MAX_S)
+        axe.liberer()
+    if axe.erreur is not None:
+        raise RuntimeError(f"génération d'impulsions interrompue : {axe.erreur}")
+    return axe.pas, pas_detection, atteinte
 
 
 try:
-    depart = position_lue()
-    print(f"\n  Axe {poste} — position lue : {depart or 'aucune fin de course active'}")
+    # ── PHASE 1 : RECALAGE ASSISTÉ ─────────────────────────────────────────
+    etat = lire_capteurs()
+    if etat[COUPE] and etat[LIGATURAGE]:
+        raise SystemExit("  ⚠ les deux fins de course sont actives (défaut D2) — voir test_3")
+    print(f"\n  PHASE 1 — recalage assisté de l'axe {poste.upper()}, à {VITESSE_JOG_DEG_S:.0f}°/s.")
+    print(f"    a / z = coup de {PETIT_COUP_DEG:.0f}° (DIR 0 / DIR 1)     "
+          f"A / Z = coup de {GRAND_COUP_DEG:.0f}°")
+    print("    s = état des fins de course      q = quitter")
+    print("  But : atteindre une fin de course, puis l'autre.")
+    afficher_capteurs(etat)
 
-    # ── 1. SENS ────────────────────────────────────────────────────────────
-    vers = opposee(depart) if depart else cfg.POSITION_LIGATURAGE
-    nombre = round(cfg.PAS_PAR_DEGRE * DEGRES_TEST_SENS)
-    direction = cfg.DIR_VERS_LIGATURAGE if vers == cfg.POSITION_LIGATURAGE else cfg.DIR_VERS_COUPE
-    print(f"\n  ÉTAPE 1 — {nombre} pas ({DEGRES_TEST_SENS:.0f}°) lents, vers la position {vers.upper()}.")
-    attendre_entree("Entrée pour lancer.")
-    pas_a_vide(axe, direction, nombre)
-    if not confirmer(f"L'axe {poste.upper()} a-t-il tourné (et pas l'autre) ?"):
-        print("  → vérifier DIR_MERE / DIR_FILLE, ENA_*, PUL_* dans config.py,")
-        print("    l'alimentation de puissance du driver et sa LED d'alarme.")
-        raise SystemExit(1)
-    if not confirmer(f"Est-il parti vers la position {vers.upper()} ?"):
-        print("  → échanger DIR_VERS_COUPE et DIR_VERS_LIGATURAGE dans config.py.")
-        pas_a_vide(axe, cfg.DIR_VERS_COUPE if vers == cfg.POSITION_LIGATURAGE else cfg.DIR_VERS_LIGATURAGE,
-                   nombre)
+    position = 0             # en pas, signée : DIR 1 = +, DIR 0 = −
+    trouve = {}              # position → (niveau DIR, position en pas à la détection)
+    while len(trouve) < 2:
+        commande = input("\n  > ").strip()
+        if commande == "q":
+            raise SystemExit("  Arrêt demandé.")
+        if commande == "s":
+            etat = lire_capteurs()
+            afficher_capteurs(etat)
+            continue
+        if commande not in ("a", "z", "A", "Z"):
+            print("    touches : a z A Z s q")
+            continue
+        niveau = 1 if commande in ("z", "Z") else 0
+        degres = GRAND_COUP_DEG if commande in ("A", "Z") else PETIT_COUP_DEG
+
+        # Déjà sur une fin de course atteinte dans ce sens : on ne pousse pas plus loin.
+        en_butee = [p for p, (n, _) in trouve.items() if n == niveau and etat[p]]
+        if en_butee:
+            print(f"    refusé : l'axe est déjà sur la fin de course {en_butee[0].upper()} "
+                  f"dans ce sens. Repartir dans l'autre sens.")
+            continue
+
+        signe = 1 if niveau else -1
+        pas, pas_detection, atteinte = coup(niveau, degres, etat)
+        if atteinte is not None:
+            trouve[atteinte] = (niveau, position + signe * pas_detection)
+            print(f"    ✓ fin de course {atteinte.upper()} atteinte avec DIR = {niveau}")
+        position += signe * pas
+        etat = lire_capteurs()
+        print(f"    {pas} pas, DIR = {niveau}, position {position:+d} pas")
+        afficher_capteurs(etat)
+        if etat[COUPE] and etat[LIGATURAGE]:
+            raise SystemExit("  ⚠ les deux fins de course sont actives (défaut D2) — voir test_3")
+
+    # ── PHASE 2 : RÉSULTAT ─────────────────────────────────────────────────
+    dir_coupe, pos_coupe = trouve[COUPE]
+    dir_ligaturage, pos_ligaturage = trouve[LIGATURAGE]
+    course = abs(pos_ligaturage - pos_coupe)
+    print("\n  PHASE 2 — résultat")
+    if dir_coupe == dir_ligaturage:
+        print("  ⚠ Les deux fins de course ont été atteintes avec le MÊME niveau de DIR.")
+        print("    Impossible sur un axe qui va et vient : le signal DIR n'arrive pas au")
+        print("    driver (DIR_MERE / DIR_FILLE dans config.py, câblage DIR+ / DIR−), ou")
+        print("    les deux capteurs sont affectés au même galet.")
         raise SystemExit(1)
 
-    # ── 2. COURSE LENTE ────────────────────────────────────────────────────
-    cible = vers
-    print(f"\n  ÉTAPE 2 — course LENTE jusqu'à la fin de course {cible.upper()} "
-          f"(budget {cfg.MOTEUR_BUDGET_PAS} pas).")
-    attendre_entree("Entrée pour lancer.")
-    pas_capteur, total = deplacer(axe, entrees, poste, cible, lent=True, budget=cfg.MOTEUR_BUDGET_PAS)
-    if pas_capteur is None:
-        print(f"  ✗ fin de course {cible} NON atteinte en {total} pas (ce serait un défaut D1).")
-        raise SystemExit(1)
-    print(f"  ✓ fin de course {cible} atteinte après {pas_capteur} pas, arrêt à {total} pas.")
+    print(f"    DIR_VERS_COUPE      = {dir_coupe}"
+          + ("   ✓ comme config.py" if dir_coupe == cfg.DIR_VERS_COUPE else "   ← À CORRIGER dans config.py"))
+    print(f"    DIR_VERS_LIGATURAGE = {dir_ligaturage}"
+          + ("   ✓ comme config.py" if dir_ligaturage == cfg.DIR_VERS_LIGATURAGE
+             else "   ← À CORRIGER dans config.py"))
+    degres_mesures = course / cfg.PAS_PAR_DEGRE
+    print(f"    course mesurée      = {course} pas = {degres_mesures:.1f}° d'axe "
+          f"(config.py : {cfg.MOTEUR_COURSE_PAS} pas = {cfg.MOTEUR_COURSE_DEGRES}°)")
+    course_conforme = abs(course - cfg.MOTEUR_COURSE_PAS) <= cfg.MOTEUR_MARGE_PAS
+    if not course_conforme:
+        print(f"    ← À CORRIGER : MOTEUR_COURSE_DEGRES = {degres_mesures:.1f}")
+        print("      (mesure faite à la main, moteur relâché entre les coups : à quelques pas près ;")
+        print("       test_6_course.py donne une mesure plus fine)")
 
-    # ── 3. COURSE AU PROFIL ────────────────────────────────────────────────
-    print(f"\n  ÉTAPE 3 — aller-retour au PROFIL : {cfg.MOTEUR_VITESSE_MAX_SPS:.0f} pas/s max, "
-          f"rampes {cfg.MOTEUR_ACCEL_PAS} / {cfg.MOTEUR_DECEL_PAS} pas, approche "
-          f"{cfg.MOTEUR_VITESSE_APPROCHE_SPS:.0f} pas/s.")
-    while confirmer("Lancer un aller-retour ?"):
-        for cible in (opposee(cible), opposee(opposee(cible))):
-            pas_capteur, total = deplacer(axe, entrees, poste, cible, lent=False,
-                                          budget=cfg.MOTEUR_BUDGET_PAS)
+    # ── PHASE 3 : AUTO-TEST ────────────────────────────────────────────────
+    print("\n  PHASE 3 — auto-test : allers-retours automatiques entre les deux fins de course.")
+    if not confirmer("Zone dégagée, lancer l'auto-test ?"):
+        raise SystemExit("  Auto-test non lancé.")
+
+    # Le test utilise le sens qu'il vient de trouver, sans attendre la correction de config.py.
+    cfg.DIR_VERS_COUPE, cfg.DIR_VERS_LIGATURAGE = dir_coupe, dir_ligaturage
+    budget = course + cfg.MOTEUR_MARGE_PAS + cfg.MOTEUR_SURCOURSE_PAS
+    cible = COUPE if etat[LIGATURAGE] else LIGATURAGE
+    series = [("lent", True, ALLERS_RETOURS_LENTS)]
+    if course_conforme:
+        series.append(("profil", False, ALLERS_RETOURS_PROFIL))
+    else:
+        print("    Course mesurée différente de config.py : auto-test LENT seulement.")
+        print("    Corriger MOTEUR_COURSE_DEGRES puis relancer pour tester le profil.")
+
+    resultats = []
+    for nom, lent, nombre in series:
+        if nom == "profil":
+            print(f"    profil : {cfg.MOTEUR_VITESSE_MAX_SPS:.0f} pas/s max "
+                  f"({cfg.MOTEUR_VITESSE_MAX_SPS / cfg.PAS_PAR_DEGRE:.0f}°/s), approche "
+                  f"{cfg.MOTEUR_VITESSE_APPROCHE_SPS:.0f} pas/s")
+        for _ in range(2 * nombre):
+            debut = time.monotonic()
+            pas_capteur, total = deplacer(axe, entrees, poste, cible, lent=lent, budget=budget)
+            duree = time.monotonic() - debut
             if pas_capteur is None:
-                print(f"  ✗ fin de course {cible} NON atteinte en {total} pas (défaut D1).")
+                print(f"    ✗ {nom:6s} vers {cible:11s} : fin de course NON atteinte en {total} pas "
+                      "(ce serait un défaut D1)")
                 raise SystemExit(1)
-            print(f"  ✓ {cible:11s} : capteur à {pas_capteur} pas, arrêt à {total} pas")
+            print(f"    ✓ {nom:6s} vers {cible:11s} : galet à {pas_capteur} pas, arrêt à {total} pas, "
+                  f"{duree:.2f} s")
+            resultats.append(pas_capteur)
+            cible = COUPE if cible == LIGATURAGE else LIGATURAGE
+            time.sleep(0.3)
+
+    ecart = max(resultats) - min(resultats)
+    print(f"\n  Auto-test réussi : {len(resultats)} trajets, galet atteint entre {min(resultats)} "
+          f"et {max(resultats)} pas (écart {ecart}).")
+    if ecart > cfg.MOTEUR_SURCOURSE_PAS + 10:
+        print("  ⚠ Écart important entre trajets : perte de pas, jeu mécanique ou galet à")
+        print("    grande course morte. À comprendre avant de monter en vitesse.")
 except KeyboardInterrupt:
     print("\n  Interrompu.")
 finally:
