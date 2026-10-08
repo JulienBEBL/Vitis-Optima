@@ -83,7 +83,7 @@ RELECTURE_CONFIG_MCP_PERIODE_S = 2.0
 # ── Adresses des trois MCP23017 ────────────────────────────────────────────
 MCP_RELAIS_ADDR = 0x24    # port A = 6 relais (A2..A7)        | port B = 6 boutons (B0..B5)
 MCP_DRIVERS_ADDR = 0x25   # port A = DIR drivers 1..8 (A7..A0) | port B = ENA drivers 1..8 (B0..B7)
-MCP_ENTREES_ADDR = 0x26   # port A = 4 fins de course (A4..A7) | port B = ACQUITTEMENT (B0)
+MCP_ENTREES_ADDR = 0x26   # port A = libre | port B = ACQUITTEMENT (B0) + 4 fins de course (B1..B4)
 
 # ── Configuration attendue de chaque MCP : (port A, port B) ────────────────
 # IODIR : bit à 1 = entrée, bit à 0 = sortie. Un port = une seule direction :
@@ -138,15 +138,15 @@ EV_COUPE_FILLE = 5     # GPA5 — relais 4
 # ═══════════════════════════════════════════════════════════════════════════
 #  BOUTONS  (entrées)
 # ═══════════════════════════════════════════════════════════════════════════
-# ⚠ CORRESPONDANCE À CONFIRMER (test_2_boutons.py).
+# Correspondance relevée sur machine le 2026-10-08 (test_2_boutons.py).
 
 # MCP 0x24 port B — 6 entrées câblées (B0..B5).
 BTN_BRIDAGE_MERE = 0     # GPB0
-BTN_COUPE_MERE = 1       # GPB1
-BTN_POSITION_MERE = 2    # GPB2
-BTN_BRIDAGE_FILLE = 3    # GPB3
-BTN_COUPE_FILLE = 4      # GPB4
-BTN_POSITION_FILLE = 5   # GPB5
+BTN_COUPE_MERE = 2       # GPB2
+BTN_POSITION_MERE = 1    # GPB1
+BTN_BRIDAGE_FILLE = 5    # GPB5
+BTN_COUPE_FILLE = 3      # GPB3
+BTN_POSITION_FILLE = 4   # GPB4
 
 # MCP 0x26 port B — 5 entrées câblées (B0..B4). Le 0x24 n'a pas de 7e entrée.
 BTN_ACQUITTEMENT = 0     # GPB0
@@ -161,17 +161,19 @@ ANTI_REBOND_BOUTON_S = 0.05
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  FINS DE COURSE  (entrées — MCP 0x26 port A)
+#  FINS DE COURSE  (entrées — MCP 0x26 port B)
 # ═══════════════════════════════════════════════════════════════════════════
 # Les 4 sur le MÊME port, volontairement : un seul octet lu, donc les quatre
 # bits datent du même instant — le contrôle « deux capteurs actifs » (D2) porte
 # sur une photo cohérente.
 # ⚠ CORRESPONDANCE À CONFIRMER (test_3_capteurs.py).
 
-CAP_MERE_COUPE = 4          # GPA4
-CAP_MERE_LIGATURAGE = 5     # GPA5
-CAP_FILLE_COUPE = 6         # GPA6
-CAP_FILLE_LIGATURAGE = 7    # GPA7
+# Câblage relevé sur machine le 2026-10-08 : les 4 arrivent sur GPB1..GPB4.
+# ⚠ QUI EST QUI reste à relever (test_3_capteurs.py) — valeurs provisoires.
+CAP_MERE_COUPE = 1          # GPB1
+CAP_MERE_LIGATURAGE = 2     # GPB2
+CAP_FILLE_COUPE = 3         # GPB3
+CAP_FILLE_LIGATURAGE = 4    # GPB4
 
 # Contact NO + pull-up : galet actionné = contact fermé = niveau BAS.
 # Fil coupé ou connecteur débranché = niveau HAUT = « pas en position » :
@@ -475,8 +477,9 @@ def verifier_config() -> None:
     cap = {"CAP_MERE_COUPE": CAP_MERE_COUPE, "CAP_MERE_LIGATURAGE": CAP_MERE_LIGATURAGE,
            "CAP_FILLE_COUPE": CAP_FILLE_COUPE, "CAP_FILLE_LIGATURAGE": CAP_FILLE_LIGATURAGE}
     for nom, bit in cap.items():
-        _dans(nom, bit, set(range(4, 8)))          # entrées câblées A4..A7
-    _distincts("fins de course (0x26 A)", cap)
+        _dans(nom, bit, set(range(0, 5)))          # entrées câblées B0..B4
+    # Même port que ACQUITTEMENT : aucun bit en double entre les cinq.
+    _distincts("fins de course + acquittement (0x26 B)", {**cap, "BTN_ACQUITTEMENT": BTN_ACQUITTEMENT})
 
     for nom, bit in (("DIR_MERE", DIR_MERE), ("DIR_FILLE", DIR_FILLE),
                      ("ENA_MERE", ENA_MERE), ("ENA_FILLE", ENA_FILLE)):

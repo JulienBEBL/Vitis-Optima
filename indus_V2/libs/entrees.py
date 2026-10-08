@@ -85,7 +85,7 @@ class Entrees:
             "position_fille": ("0x24_B", cfg.BTN_POSITION_FILLE),
             "acquittement": ("0x26_B", cfg.BTN_ACQUITTEMENT),
         }
-        # (poste, position) → bit du port A du 0x26
+        # (poste, position) → bit du port B du 0x26
         self._cablage_capteurs = {
             (cfg.POSTE_MERE, cfg.POSITION_COUPE): cfg.CAP_MERE_COUPE,
             (cfg.POSTE_MERE, cfg.POSITION_LIGATURAGE): cfg.CAP_MERE_LIGATURAGE,
@@ -106,7 +106,7 @@ class Entrees:
         self.octets = {"0x24_B": octet_24b, "0x26_A": octet_26a, "0x26_B": octet_26b}
 
         for cle, bit in self._cablage_capteurs.items():
-            self.capteurs[cle].maj(_actif(octet_26a, bit, cfg.CAPTEURS_ACTIFS_BAS), maintenant)
+            self.capteurs[cle].maj(_actif(octet_26b, bit, cfg.CAPTEURS_ACTIFS_BAS), maintenant)
         for nom, (source, bit) in self._cablage_boutons.items():
             self.boutons[nom].maj(_actif(self.octets[source], bit, cfg.BOUTONS_ACTIFS_BAS), maintenant)
 
