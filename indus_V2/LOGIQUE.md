@@ -448,7 +448,10 @@ la mise sous tension. Le programme le corrige immédiatement et le journalise.
 | GPA4–7 | libres (câblés, disponibles) | — |
 | GPA0–3 | non câblés | — |
 | GPB0 | bouton **ACQUITTEMENT** (relevé le 2026-10-08) | `BTN_ACQUITTEMENT = 0` |
-| GPB1–4 | les 4 **fins de course** (relevé le 2026-10-08 ; qui est qui : ⚠ test_3) | `CAP_*` |
+| GPB1 | fin de course **mère · POSITION_LIGATURAGE** (relevé le 2026-10-08) | `CAP_MERE_LIGATURAGE = 1` |
+| GPB2 | fin de course **fille · POSITION_COUPE** (relevé) | `CAP_FILLE_COUPE = 2` |
+| GPB3 | fin de course **fille · POSITION_LIGATURAGE** (relevé) | `CAP_FILLE_LIGATURAGE = 3` |
+| GPB4 | fin de course **mère · POSITION_COUPE** (relevé) | `CAP_MERE_COUPE = 4` |
 | GPB5–7 | non câblés | — |
 
 **Les quatre fins de course sont sur le même port, volontairement.** Un seul octet lu →

@@ -168,18 +168,18 @@ ANTI_REBOND_BOUTON_S = 0.05
 # sur une photo cohérente.
 # ⚠ CORRESPONDANCE À CONFIRMER (test_3_capteurs.py).
 
-# Câblage relevé sur machine le 2026-10-08 : les 4 arrivent sur GPB1..GPB4.
-# ⚠ QUI EST QUI reste à relever (test_3_capteurs.py) — valeurs provisoires.
-CAP_MERE_COUPE = 1          # GPB1
-CAP_MERE_LIGATURAGE = 2     # GPB2
-CAP_FILLE_COUPE = 3         # GPB3
-CAP_FILLE_LIGATURAGE = 4    # GPB4
+# Correspondance et polarité relevées sur machine le 2026-10-08 (test_3_capteurs.py).
+CAP_MERE_COUPE = 4          # GPB4
+CAP_MERE_LIGATURAGE = 1     # GPB1
+CAP_FILLE_COUPE = 2         # GPB2
+CAP_FILLE_LIGATURAGE = 3    # GPB3
 
 # Contact NO + pull-up : galet actionné = contact fermé = niveau BAS.
 # Fil coupé ou connecteur débranché = niveau HAUT = « pas en position » :
 # un capteur débranché ne peut jamais provoquer un faux arrêt, le moteur
 # épuise son budget de pas et part en défaut D1.
-# ⚠ À CONFIRMER (test_3_capteurs.py) : mettre en position, puis débrancher.
+# Polarité confirmée sur machine le 2026-10-08. ⚠ Reste à faire : le test de
+# débranchement (test_3_capteurs.py, galet actionné, débrancher → voyant éteint).
 CAPTEURS_ACTIFS_BAS = True
 
 # Logique inverse des boutons : on ARRÊTE le moteur sur la lecture brute (pas

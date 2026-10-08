@@ -1,13 +1,20 @@
 # -*- coding: utf-8 -*-
 """
-test_3_capteurs.py — Les fins de course : laquelle est laquelle, et dans quel sens.
+test_3_capteurs.py — Aperçu en direct des 4 fins de course.
 
 Lecture seule : aucun relais, aucun ENA n'est écrit.
 
-    python3 tests/test_3_capteurs.py            mode ATTRIBUTION (par défaut)
-    python3 tests/test_3_capteurs.py --direct   bits bruts en direct
+    python3 tests/test_3_capteurs.py                 APERÇU (par défaut)
+    python3 tests/test_3_capteurs.py --attribution   refaire la correspondance
+    python3 tests/test_3_capteurs.py --direct        bits bruts de tous les ports
 
-Mode ATTRIBUTION : le script nomme une fin de course (« MÈRE — position COUPE »…),
+APERÇU : un voyant par fin de course, selon config.py (correspondance relevée
+sur machine le 2026-10-08). Galet actionné = voyant allumé. Signale si les
+deux fins de course d'un même axe sont actives ensemble (ce serait un défaut
+D2). Sert aussi au test de débranchement : galet actionné, débrancher le
+connecteur → le voyant doit S'ÉTEINDRE. Ctrl+C pour le bilan.
+
+Mode ATTRIBUTION (à refaire seulement si le câblage change) : le script nomme une fin de course (« MÈRE — position COUPE »…),
 tu actionnes à la main le galet correspondant puis tu le relâches. Il note sur
 quel bit ça arrive et dans quel sens le bit bascule. À la fin il affiche les
 lignes CAP_* à recopier dans config.py. Il écoute tous les bits des ports
@@ -25,7 +32,8 @@ import sys
 import time
 
 import _commun
-from _commun import bits, titre
+from _commun import bits, cfg, titre, voyant
+from libs.entrees import Entrees
 
 PORTS = ("0x26 A", "0x26 B", "0x24 B")
 PERIODE_S = 0.01
@@ -142,11 +150,44 @@ def mode_direct() -> None:
         print()
 
 
+def mode_apercu() -> None:
+    cles = ((cfg.POSTE_MERE, cfg.POSITION_COUPE), (cfg.POSTE_MERE, cfg.POSITION_LIGATURAGE),
+            (cfg.POSTE_FILLE, cfg.POSITION_COUPE), (cfg.POSTE_FILLE, cfg.POSITION_LIGATURAGE))
+    entrees = Entrees(materiel.relais, materiel.entrees)
+    vus = {cle: False for cle in cles}
+    d2_vu = False
+    print("  Actionner les galets. Ctrl+C pour le bilan.\n")
+    print("  MÈRE coupe   MÈRE ligat.   FILLE coupe   FILLE ligat.   0x26 B")
+    try:
+        while True:
+            entrees.rafraichir(time.monotonic())
+            alerte = ""
+            for poste in cfg.POSTES:
+                if (entrees.capteur(poste, cfg.POSITION_COUPE).stable
+                        and entrees.capteur(poste, cfg.POSITION_LIGATURAGE).stable):
+                    alerte = f"⚠ {poste} : LES DEUX actifs (D2)"
+                    d2_vu = True
+            for cle in cles:
+                vus[cle] |= entrees.capteurs[cle].stable
+            print("\r  " + "".join(f"    {voyant(entrees.capteurs[cle].stable)}        " for cle in cles)
+                  + f" {bits(entrees.octets['0x26_B'])}   {alerte:34s}", end="", flush=True)
+            time.sleep(cfg.PERIODE_BOUCLE_S)
+    except KeyboardInterrupt:
+        print("\n\n  Bilan :")
+        for (poste, position), vu in vus.items():
+            print(f"    {poste:6s} {position:11s} {'✓ vu actif' if vu else '✗ jamais vu actif'}")
+        if d2_vu:
+            print("    ⚠ deux fins de course d'un même axe ont été vues actives ensemble")
+        print()
+
+
 try:
-    if "--direct" in sys.argv:
+    if "--attribution" in sys.argv:
+        mode_attribution()
+    elif "--direct" in sys.argv:
         mode_direct()
     else:
-        mode_attribution()
+        mode_apercu()
 except KeyboardInterrupt:
     print("\n  Abandonné.\n")
 finally:

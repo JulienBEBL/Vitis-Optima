@@ -1,21 +1,20 @@
 # -*- coding: utf-8 -*-
 """
-test_2_boutons.py — Correspondance bouton physique ↔ bit, anti-rebond, fronts.
+test_2_boutons.py — Aperçu en direct des 7 boutons.
 
 Lecture seule : aucun relais, aucun ENA n'est écrit.
 
-    python3 tests/test_2_boutons.py            mode ATTRIBUTION (par défaut)
-    python3 tests/test_2_boutons.py --direct   affichage en direct, selon config.py
+    python3 tests/test_2_boutons.py                 APERÇU (par défaut)
+    python3 tests/test_2_boutons.py --attribution   refaire la correspondance
 
-Mode ATTRIBUTION : le script nomme une fonction (« BRIDAGE MÈRE »…), tu appuies
-sur le bouton physique que tu veux lui donner, il note sur quel bit il arrive.
-À la fin il affiche les lignes BTN_* à recopier dans config.py. Il écoute les
-8 bits du 0x24 port B et les 8 bits du 0x26 port B, quelle que soit la config
-actuelle. Ctrl+C pour abandonner.
+APERÇU : chaque bouton a son voyant et son compteur d'appuis, selon config.py
+(correspondance relevée sur machine le 2026-10-08). Un appui = le bon voyant
+s'allume et son compteur augmente de 1. Un appui maintenu ne compte qu'UN
+appui. Ctrl+C pour le bilan.
 
-Mode DIRECT : appuyer une fois sur chaque bouton. Le bon voyant doit s'allumer
-et son compteur augmenter de 1. Un appui maintenu ne compte qu'UN appui.
-Ctrl+C pour le bilan.
+ATTRIBUTION : à refaire seulement si le câblage change. Le script nomme une
+fonction, tu appuies sur le bouton voulu, il affiche les lignes BTN_* à
+recopier dans config.py.
 """
 
 import sys
@@ -123,10 +122,10 @@ def mode_attribution(materiel) -> None:
 titre("TEST 2 — BOUTONS")
 materiel = _commun.ouvrir_lecture_seule()
 try:
-    if "--direct" in sys.argv:
-        mode_direct(materiel)
-    else:
+    if "--attribution" in sys.argv:
         mode_attribution(materiel)
+    else:
+        mode_direct(materiel)
 except KeyboardInterrupt:
     print("\n  Abandonné.\n")
 finally:
