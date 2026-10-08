@@ -291,6 +291,13 @@ MOTEUR_VITESSE_APPROCHE_SPS = 150.0     # pas/s — démarrage et approche final
 MOTEUR_ACCEL_SPS2 = 3000.0              # pas/s² — rampe de montée
 MOTEUR_DECEL_SPS2 = 3000.0              # pas/s² — rampe de descente
 
+# True  : rampes « en S » — la vitesse suit une courbe douce (demi-cosinus),
+#         sans cassure à l'entrée ni à la sortie de la rampe. Moins d'à-coups,
+#         donc moins de vibrations. MOTEUR_ACCEL_SPS2 / DECEL sont alors
+#         l'accélération de POINTE, atteinte au milieu de la rampe.
+# False : rampes droites (accélération constante, cassures aux deux bouts).
+MOTEUR_RAMPES_EN_S = True
+
 MOTEUR_DISTANCE_APPROCHE_DEG = 5.0      # degrés d'axe parcourus à vitesse lente avant la position nominale
 MOTEUR_MARGE_DEG = 10.0                 # degrés tolérés AU-DELÀ de la course nominale avant défaut D1
 MOTEUR_SURCOURSE_DEG = 1.0              # degrés parcourus APRÈS la fin de course, pour s'asseoir franchement
@@ -310,10 +317,13 @@ MOTEUR_APPROCHE_PAS = round(PAS_PAR_DEGRE * MOTEUR_DISTANCE_APPROCHE_DEG)
 MOTEUR_MARGE_PAS = round(PAS_PAR_DEGRE * MOTEUR_MARGE_DEG)
 MOTEUR_SURCOURSE_PAS = round(PAS_PAR_DEGRE * MOTEUR_SURCOURSE_DEG)
 MOTEUR_DEGAGEMENT_MAX_PAS = round(PAS_PAR_DEGRE * MOTEUR_DEGAGEMENT_MAX_DEG)
+# En S, la rampe est π/2 fois plus longue : c'est ce qui garde la même
+# accélération de POINTE que la rampe droite.
+_ALLONGEMENT_RAMPE = math.pi / 2 if MOTEUR_RAMPES_EN_S else 1.0
 MOTEUR_ACCEL_PAS = math.ceil((MOTEUR_VITESSE_MAX_SPS ** 2 - MOTEUR_VITESSE_APPROCHE_SPS ** 2)
-                             / (2 * MOTEUR_ACCEL_SPS2))
+                             / (2 * MOTEUR_ACCEL_SPS2) * _ALLONGEMENT_RAMPE)
 MOTEUR_DECEL_PAS = math.ceil((MOTEUR_VITESSE_MAX_SPS ** 2 - MOTEUR_VITESSE_APPROCHE_SPS ** 2)
-                             / (2 * MOTEUR_DECEL_SPS2))
+                             / (2 * MOTEUR_DECEL_SPS2) * _ALLONGEMENT_RAMPE)
 MOTEUR_FIN_DECEL_PAS = MOTEUR_COURSE_PAS - MOTEUR_APPROCHE_PAS
 
 # BUDGET DE PAS — borne DURE de chaque mouvement, référencement compris. Le

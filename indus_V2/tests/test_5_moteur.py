@@ -192,6 +192,7 @@ try:
         print("    Corriger MOTEUR_COURSE_DEGRES puis relancer pour tester le profil.")
 
     resultats = []
+    detail = {}              # (mode, cible) → [(pas au galet, pas à l'arrêt, durée)]
     for nom, lent, nombre in series:
         if nom == "profil":
             print(f"    profil : {cfg.MOTEUR_VITESSE_MAX_SPS:.0f} pas/s max "
@@ -208,12 +209,31 @@ try:
             print(f"    ✓ {nom:6s} vers {cible:11s} : galet à {pas_capteur} pas, arrêt à {total} pas, "
                   f"{duree:.2f} s")
             resultats.append(pas_capteur)
+            detail.setdefault((nom, cible), []).append((pas_capteur, total, duree))
             cible = COUPE if cible == LIGATURAGE else LIGATURAGE
             time.sleep(0.3)
 
     ecart = max(resultats) - min(resultats)
     print(f"\n  Auto-test réussi : {len(resultats)} trajets, galet atteint entre {min(resultats)} "
           f"et {max(resultats)} pas (écart {ecart}).")
+
+    print("\n  ┌─ RÉCAPITULATIF À M'ENVOYER " + "─" * 46)
+    print(f"  │ axe {poste} — {cfg.DRIVER_PAS_PAR_TOUR} pas/tr, réduction {cfg.MOTEUR_REDUCTION}, "
+          f"rampes {'en S' if cfg.MOTEUR_RAMPES_EN_S else 'droites'}")
+    print(f"  │ DIR vers coupe = {dir_coupe}, DIR vers ligaturage = {dir_ligaturage}, "
+          f"course au recalage manuel = {course} pas")
+    print(f"  │ profil : max {cfg.MOTEUR_VITESSE_MAX_SPS:.0f} pas/s, approche "
+          f"{cfg.MOTEUR_VITESSE_APPROCHE_SPS:.0f} pas/s, accél. {cfg.MOTEUR_ACCEL_SPS2:.0f}, "
+          f"décél. {cfg.MOTEUR_DECEL_SPS2:.0f} pas/s²")
+    print("  │")
+    print("  │ mode    sens              trajets  pas au galet (min / moy / max)   durée moy.")
+    for (nom, sens), mesures in detail.items():
+        pas_galet = [m[0] for m in mesures]
+        durees = [m[2] for m in mesures]
+        print(f"  │ {nom:6s}  vers {sens:11s}  {len(mesures):^7d}  "
+              f"{min(pas_galet):5d} / {sum(pas_galet) / len(pas_galet):7.1f} / {max(pas_galet):5d}"
+              f"        {sum(durees) / len(durees):5.2f} s")
+    print("  └" + "─" * 73)
     if ecart > cfg.MOTEUR_SURCOURSE_PAS + 10:
         print("  ⚠ Écart important entre trajets : perte de pas, jeu mécanique ou galet à")
         print("    grande course morte. À comprendre avant de monter en vitesse.")

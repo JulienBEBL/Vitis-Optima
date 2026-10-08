@@ -43,11 +43,17 @@ def _vitesse_profil(pas: int) -> float:
     if pas >= fin_decel:
         return v_app
     if pas < cfg.MOTEUR_ACCEL_PAS:
-        v = math.sqrt(v_app ** 2 + 2 * cfg.MOTEUR_ACCEL_SPS2 * pas)
+        avancement, acceleration, longueur = pas, cfg.MOTEUR_ACCEL_SPS2, cfg.MOTEUR_ACCEL_PAS
     elif pas >= fin_decel - cfg.MOTEUR_DECEL_PAS:
-        v = math.sqrt(v_app ** 2 + 2 * cfg.MOTEUR_DECEL_SPS2 * (fin_decel - pas))
+        avancement, acceleration, longueur = fin_decel - pas, cfg.MOTEUR_DECEL_SPS2, cfg.MOTEUR_DECEL_PAS
     else:
-        v = v_max
+        return v_max
+    if cfg.MOTEUR_RAMPES_EN_S:
+        # Demi-cosinus : pente nulle aux deux bouts de la rampe, donc pas de
+        # cassure de vitesse — c'est la cassure qui excite la mécanique.
+        v = v_app + (v_max - v_app) * (1 - math.cos(math.pi * avancement / longueur)) / 2
+    else:
+        v = math.sqrt(v_app ** 2 + 2 * acceleration * avancement)
     return min(v, v_max)
 
 
