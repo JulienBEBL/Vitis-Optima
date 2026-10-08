@@ -764,6 +764,18 @@ neutralisable dans `config.py`.
 | 7 | **Choix de la puce GPIO par libellé** (« rp1 ») | Selon le noyau, `gpiochip0` n'est pas le RP1 : ouvrir la mauvaise puce ferait basculer la broche 17 d'un autre contrôleur | `GPIO_CHIP_LIBELLE` |
 | 8 | **Relecture des latchs de sortie** dans D7, en plus de IODIR et GPPU | Un MCP réinitialisé garde IODIR = 0xFF sur un port d'entrée : seuls GPPU et OLAT trahissent la réinitialisation | — |
 
+### Relevés sur machine (2026-10-08) — ce qui a changé depuis la version 2
+
+| Sujet | Relevé | Conséquence |
+|---|---|---|
+| Boutons | 6 sur 0x24 GPB0..5, ACQUITTEMENT sur 0x26 GPB0 | `BTN_*` à jour |
+| Fins de course | sur 0x26 **port B**, GPB1..4 (et non port A) ; contact NO confirmé | `CAP_*` à jour, `libs/entrees.py` lit le port B |
+| Drivers | 1600 pas/tr, 4,28 A RMS, demi-courant à l'arrêt | `DRIVER_PAS_PAR_TOUR = 1600` |
+| **Sens de rotation** | les axes sont montés en miroir : DIR vers ligaturage = 0 pour la mère, 1 pour la fille | `DIR_VERS_LIGATURAGE` et `DIR_VERS_COUPE` sont **par axe** |
+| **Course** | ≈ 198 pas (44,5°) pour la mère, ≈ 531 pas (119,5°) pour la fille | `MOTEUR_COURSE_DEGRES`, budget et profil sont **par axe** |
+| Course courte | la mère n'a pas la place d'atteindre la vitesse max | les rampes sont raccourcies et la vitesse de pointe baisse (`MOTEUR_VITESSE_POINTE_SPS`), au lieu de refuser de démarrer |
+| Vibrations | constatées aux essais | rampes en S (`MOTEUR_RAMPES_EN_S`) |
+
 ### Vérification sur banc logiciel
 
 Avant livraison, toute la logique a tourné sur PC contre un faux matériel (faux `smbus2`,
