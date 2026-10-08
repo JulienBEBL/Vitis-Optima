@@ -44,9 +44,9 @@ def _vitesse_profil(poste: str, pas: int) -> float:
     if pas >= fin_decel:
         return v_app
     if pas < accel_pas:
-        avancement, acceleration, longueur = pas, cfg.MOTEUR_ACCEL_SPS2, accel_pas
+        avancement, acceleration, longueur = pas, cfg.MOTEUR_ACCEL_SPS2[poste], accel_pas
     elif pas >= fin_decel - decel_pas:
-        avancement, acceleration, longueur = fin_decel - pas, cfg.MOTEUR_DECEL_SPS2, decel_pas
+        avancement, acceleration, longueur = fin_decel - pas, cfg.MOTEUR_DECEL_SPS2[poste], decel_pas
     else:
         return v_max
     if cfg.MOTEUR_RAMPES_EN_S:

@@ -221,9 +221,9 @@ try:
     print(f"  │ DIR vers coupe = {dir_coupe}, DIR vers ligaturage = {dir_ligaturage}, "
           f"course au recalage manuel = {course} pas")
     print(f"  │ profil : pointe {cfg.MOTEUR_VITESSE_POINTE_SPS[poste]:.0f} pas/s "
-          f"(max demandé {cfg.MOTEUR_VITESSE_MAX_SPS:.0f}), approche "
-          f"{cfg.MOTEUR_VITESSE_APPROCHE_SPS:.0f} pas/s, accél. {cfg.MOTEUR_ACCEL_SPS2:.0f}, "
-          f"décél. {cfg.MOTEUR_DECEL_SPS2:.0f} pas/s²")
+          f"(max demandé {cfg.MOTEUR_VITESSE_MAX_SPS[poste]:.0f}), approche "
+          f"{cfg.MOTEUR_VITESSE_APPROCHE_SPS:.0f} pas/s, accél. {cfg.MOTEUR_ACCEL_SPS2[poste]:.0f}, "
+          f"décél. {cfg.MOTEUR_DECEL_SPS2[poste]:.0f} pas/s²")
     print("  │")
     print("  │ mode    sens              trajets  pas au galet (min / moy / max)   durée moy.")
     for (nom, sens), mesures in detail.items():

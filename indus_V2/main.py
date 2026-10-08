@@ -46,13 +46,16 @@ def _afficher_config(log):
     log.info("    maître %s, retard aller %.2f s", cfg.MOTEUR_MAITRE, cfg.RETARD_SENS_ALLER_S)
     for poste in cfg.POSTES:
         log.info("    %s : course %.1f° = %d pas, budget %d pas, DIR vers ligaturage = %d, "
-                 "pointe %.0f pas/s, rampes %d / %d pas",
+                 "max %.0f pas/s, accél. %.0f / décél. %.0f pas/s², "
+                 "pointe atteinte %.0f pas/s, rampes %d / %d pas",
                  poste, cfg.MOTEUR_COURSE_DEGRES[poste], cfg.MOTEUR_COURSE_PAS[poste],
                  cfg.MOTEUR_BUDGET_PAS[poste], cfg.DIR_VERS_LIGATURAGE[poste],
+                 cfg.MOTEUR_VITESSE_MAX_SPS[poste], cfg.MOTEUR_ACCEL_SPS2[poste],
+                 cfg.MOTEUR_DECEL_SPS2[poste],
                  cfg.MOTEUR_VITESSE_POINTE_SPS[poste], cfg.MOTEUR_ACCEL_PAS[poste],
                  cfg.MOTEUR_DECEL_PAS[poste])
-    log.info("    vitesse max %.0f pas/s, approche %.0f pas/s sur %d pas, marge %.1f°, rampes %s",
-             cfg.MOTEUR_VITESSE_MAX_SPS, cfg.MOTEUR_VITESSE_APPROCHE_SPS, cfg.MOTEUR_APPROCHE_PAS,
+    log.info("    approche %.0f pas/s sur %d pas, marge %.1f°, rampes %s",
+             cfg.MOTEUR_VITESSE_APPROCHE_SPS, cfg.MOTEUR_APPROCHE_PAS,
              cfg.MOTEUR_MARGE_DEG, "en S" if cfg.MOTEUR_RAMPES_EN_S else "droites")
     log.info("    coupe %.2f + %.2f + %.2f s, bridage %.2f s, garde %.2f s",
              cfg.TEMPS_AVANT_COUPE_S, cfg.TEMPS_COUPE_S, cfg.TEMPS_APRES_COUPE_S,

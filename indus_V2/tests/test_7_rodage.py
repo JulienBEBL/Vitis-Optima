@@ -23,9 +23,14 @@ Déroulé :
      soient arrivés (les courses sont différentes : l'un attend l'autre).
   3. Pause, puis les deux repartent ensemble vers COUPE ; et ainsi de suite.
 
-Sécurités : chaque trajet est borné en pas, par axe ; arrêt des deux axes si
-un moteur ne quitte pas sa fin de course de départ, s'il n'atteint pas sa
-cible, ou si les deux fins de course d'un axe sont actives ensemble.
+Chaque trajet est borné en pas, par axe.
+
+UN RATÉ N'ARRÊTE PAS LE RODAGE. Si un axe n'atteint pas sa cible (décrochage)
+ou ne quitte pas son galet de départ, le script note le raté, remet les deux
+axes en position COUPE à vitesse lente, puis continue. Il ne s'arrête que si :
+  - RATES_DE_SUITE_MAX trajets ratés se suivent (la machine a un vrai problème) ;
+  - la remise en COUPE échoue ;
+  - les deux fins de course d'un axe sont actives ensemble.
 Ctrl+C arrête tout.
 
 À la fin (ou sur Ctrl+C) : récapitulatif par axe et par sens, à m'envoyer.
@@ -40,6 +45,7 @@ from libs.entrees import Entrees
 from libs.moteur import Axe, PortsDrivers
 
 PAUSE_ENTRE_TRAJETS_S = 0.5
+RATES_DE_SUITE_MAX = 3       # au-delà, le rodage s'arrête
 CYCLES_PAR_DEFAUT = 10
 
 COUPE, LIGATURAGE = cfg.POSITION_COUPE, cfg.POSITION_LIGATURAGE
@@ -59,6 +65,7 @@ axes = {
     cfg.POSTE_FILLE: Axe(cfg.POSTE_FILLE, materiel.puce, cfg.PUL_FILLE, cfg.DIR_FILLE, cfg.ENA_FILLE, drivers),
 }
 mesures = {}       # (poste, cible) → [(pas au galet, pas à l'arrêt, durée jusqu'au galet)]
+rates = {}         # (poste, cible) → [(numéro du trajet, raison)]
 
 
 class Echec(Exception):
@@ -135,9 +142,13 @@ def mise_en_coupe(poste: str) -> None:
     print(f" ✓ en COUPE après {axe.pas} pas, sens correct")
 
 
-def trajet_synchrone(cible: str) -> dict:
-    """Les deux axes vers `cible`, ensemble. Rend la main quand LES DEUX sont arrivés.
-    Renvoie poste → (pas au galet, pas à l'arrêt, durée jusqu'au galet)."""
+def trajet_synchrone(cible: str) -> tuple:
+    """Les deux axes vers `cible`, ensemble. Rend la main quand LES DEUX sont arrêtés.
+
+    Renvoie (résultats, ratés) :
+      résultats : poste → (pas au galet, pas à l'arrêt, durée jusqu'au galet), ou None si raté
+      ratés     : poste → raison
+    """
     depart = COUPE if cible == LIGATURAGE else LIGATURAGE
     entrees.rafraichir(time.monotonic())
     for poste in cfg.POSTES:
@@ -151,6 +162,7 @@ def trajet_synchrone(cible: str) -> dict:
         axe.lancer(cfg.MOTEUR_BUDGET_PAS[poste], LENT)
 
     galet = {}                                     # poste → (pas, durée)
+    echecs = {}                                    # poste → raison
     try:
         while any(axe.en_marche for axe in axes.values()):
             maintenant = time.monotonic()
@@ -159,14 +171,14 @@ def trajet_synchrone(cible: str) -> dict:
                 c_cible, c_depart = entrees.capteur(poste, cible), entrees.capteur(poste, depart)
                 if c_cible.stable and c_depart.stable:
                     raise Echec(f"{poste} : les deux fins de course actives ensemble")
-                if poste in galet:
+                if poste in galet or poste in echecs:
                     continue
                 if c_cible.consecutifs >= cfg.CAPTEUR_LECTURES_ARRET:
                     galet[poste] = (axe.pas, maintenant - debut)
                     axe.demander_arret_apres(cfg.MOTEUR_SURCOURSE_PAS)
                 elif axe.pas >= cfg.MOTEUR_DEGAGEMENT_MAX_PAS and c_depart.stable:
-                    raise Echec(f"{poste} : fin de course {depart} toujours active après {axe.pas} pas "
-                                "— le moteur ne tourne pas, ou tourne dans le mauvais sens")
+                    echecs[poste] = f"n'a pas quitté la fin de course {depart} après {axe.pas} pas"
+                    axe.demander_arret()           # cet axe seulement : l'autre finit son trajet
             time.sleep(cfg.PERIODE_BOUCLE_S)
     finally:
         arreter_tout()
@@ -174,30 +186,46 @@ def trajet_synchrone(cible: str) -> dict:
     for poste, axe in axes.items():
         if axe.erreur is not None:
             raise Echec(f"{poste} : génération d'impulsions interrompue ({axe.erreur})")
-        if poste not in galet:
-            raise Echec(f"{poste} : fin de course {cible} non atteinte en {axe.pas} pas "
-                        f"(budget {cfg.MOTEUR_BUDGET_PAS[poste]})")
-    return {poste: (galet[poste][0], axes[poste].pas, galet[poste][1]) for poste in cfg.POSTES}
+        if poste not in galet and poste not in echecs:
+            echecs[poste] = (f"fin de course {cible} non atteinte en {axe.pas} pas "
+                             f"(budget {cfg.MOTEUR_BUDGET_PAS[poste]})")
+    resultats = {poste: (galet[poste][0], axes[poste].pas, galet[poste][1]) if poste in galet else None
+                 for poste in cfg.POSTES}
+    return resultats, echecs
 
 
 def recapitulatif(faits: int) -> None:
     print("\n  ┌─ RÉCAPITULATIF À M'ENVOYER " + "─" * 46)
     print(f"  │ {faits} trajet(s) synchrone(s), mode {'LENT' if LENT else 'PROFIL'} — "
           f"{cfg.DRIVER_PAS_PAR_TOUR} pas/tr, rampes {'en S' if cfg.MOTEUR_RAMPES_EN_S else 'droites'}")
-    print(f"  │ max {cfg.MOTEUR_VITESSE_MAX_SPS:.0f} pas/s, approche {cfg.MOTEUR_VITESSE_APPROCHE_SPS:.0f} "
-          f"pas/s, accél. {cfg.MOTEUR_ACCEL_SPS2:.0f}, décél. {cfg.MOTEUR_DECEL_SPS2:.0f} pas/s²")
+    print(f"  │ approche {cfg.MOTEUR_VITESSE_APPROCHE_SPS:.0f} pas/s")
     for poste in cfg.POSTES:
-        print(f"  │ {poste:5s} : course config {cfg.MOTEUR_COURSE_PAS[poste]} pas, pointe "
-              f"{cfg.MOTEUR_VITESSE_POINTE_SPS[poste]:.0f} pas/s, DIR vers ligaturage = "
-              f"{cfg.DIR_VERS_LIGATURAGE[poste]}")
+        print(f"  │ {poste:5s} : course config {cfg.MOTEUR_COURSE_PAS[poste]} pas, max "
+              f"{cfg.MOTEUR_VITESSE_MAX_SPS[poste]:.0f} pas/s (pointe atteinte "
+              f"{cfg.MOTEUR_VITESSE_POINTE_SPS[poste]:.0f}), accél. {cfg.MOTEUR_ACCEL_SPS2[poste]:.0f}, "
+              f"décél. {cfg.MOTEUR_DECEL_SPS2[poste]:.0f} pas/s²")
     print("  │")
-    print("  │ axe    sens              trajets  pas au galet (min / moy / max)   durée moy.")
-    for (poste, sens), liste in mesures.items():
-        pas = [m[0] for m in liste]
-        durees = [m[2] for m in liste]
-        print(f"  │ {poste:5s}  vers {sens:11s}  {len(liste):^7d}  "
-              f"{min(pas):5d} / {sum(pas) / len(pas):7.1f} / {max(pas):5d}        "
-              f"{sum(durees) / len(durees):5.2f} s")
+    print("  │ axe    sens              réussis  ratés  pas au galet (min / moy / max)   durée moy.")
+    for cle in sorted(set(mesures) | set(rates)):
+        poste, sens = cle
+        liste = mesures.get(cle, [])
+        nb_rates = len(rates.get(cle, []))
+        if liste:
+            pas = [m[0] for m in liste]
+            durees = [m[2] for m in liste]
+            chiffres = (f"{min(pas):5d} / {sum(pas) / len(pas):7.1f} / {max(pas):5d}        "
+                        f"{sum(durees) / len(durees):5.2f} s")
+        else:
+            chiffres = "    —"
+        print(f"  │ {poste:5s}  vers {sens:11s}  {len(liste):^7d}  {nb_rates:^5d}  {chiffres}")
+    total_rates = sum(len(liste) for liste in rates.values())
+    print("  │")
+    print(f"  │ ratés : {total_rates}")
+    for (poste, sens), liste in sorted(rates.items()):
+        for numero, raison in liste[:15]:
+            print(f"  │   trajet {numero:4d} — {poste} vers {sens} : {raison}")
+        if len(liste) > 15:
+            print(f"  │   … et {len(liste) - 15} autre(s) pour {poste} vers {sens}")
     print("  └" + "─" * 73)
 
 
@@ -215,18 +243,38 @@ try:
 
     # ── 2. Allers-retours synchrones ───────────────────────────────────────
     print("\n   n°  sens             mère : galet / arrêt / durée     fille : galet / arrêt / durée")
+    def colonne(valeurs) -> str:
+        if valeurs is None:
+            return "        R A T É        "
+        return f"{valeurs[0]:5d} / {valeurs[1]:5d} / {valeurs[2]:5.2f} s"
+
     cible = LIGATURAGE
+    rates_de_suite = 0
     for numero in range(1, 2 * cycles + 1):
-        resultat = trajet_synchrone(cible)
+        resultat, echecs = trajet_synchrone(cible)
         faits += 1
         for poste, valeurs in resultat.items():
-            mesures.setdefault((poste, cible), []).append(valeurs)
-        m, f = resultat[cfg.POSTE_MERE], resultat[cfg.POSTE_FILLE]
-        print(f"  {numero:4d}  vers {cible:11s}  {m[0]:5d} / {m[1]:5d} / {m[2]:5.2f} s"
-              f"          {f[0]:5d} / {f[1]:5d} / {f[2]:5.2f} s")
-        cible = COUPE if cible == LIGATURAGE else LIGATURAGE
+            if valeurs is not None:
+                mesures.setdefault((poste, cible), []).append(valeurs)
+        print(f"  {numero:4d}  vers {cible:11s}  {colonne(resultat[cfg.POSTE_MERE])}"
+              f"          {colonne(resultat[cfg.POSTE_FILLE])}")
+        if echecs:
+            for poste, raison in echecs.items():
+                rates.setdefault((poste, cible), []).append((numero, raison))
+                print(f"        ✗ raté — {poste} : {raison}")
+            rates_de_suite += 1
+            if rates_de_suite >= RATES_DE_SUITE_MAX:
+                raise Echec(f"{RATES_DE_SUITE_MAX} trajets ratés de suite — rodage arrêté")
+            print("        remise en position COUPE, puis reprise :")
+            for poste in (esclave, cfg.MOTEUR_MAITRE):
+                mise_en_coupe(poste)
+            cible = LIGATURAGE
+        else:
+            rates_de_suite = 0
+            cible = COUPE if cible == LIGATURAGE else LIGATURAGE
         time.sleep(PAUSE_ENTRE_TRAJETS_S)
-    print(f"\n  Rodage terminé : {cycles} allers-retours sans défaut.")
+    total_rates = sum(len(liste) for liste in rates.values())
+    print(f"\n  Rodage terminé : {faits} trajets, {total_rates} raté(s).")
 except Echec as echec:
     print(f"\n  ✗ ARRÊT : {echec}")
 except KeyboardInterrupt:
@@ -237,6 +285,6 @@ finally:
     for axe in axes.values():
         axe.attendre_fin(cfg.ARRET_THREAD_MAX_S)
     materiel.fermer()
-    if mesures:
+    if mesures or rates:
         recapitulatif(faits)
     print("  Moteurs arrêtés et libres, relais à 0.\n")
