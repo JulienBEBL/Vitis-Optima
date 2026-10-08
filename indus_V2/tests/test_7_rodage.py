@@ -34,10 +34,18 @@ axes en position COUPE à vitesse lente, puis continue. Il ne s'arrête que si :
 Ctrl+C arrête tout.
 
 À la fin (ou sur Ctrl+C) : récapitulatif par axe et par sens, à m'envoyer.
+Il est aussi ENREGISTRÉ dans indus_V2/logs/rodage_<date>_<heure>.txt, et ce
+fichier est réécrit tous les 20 trajets et à chaque raté : rien n'est perdu si
+la fenêtre se ferme ou si l'arrêt d'urgence tombe.
+
+Colonne « retard » : pire retard d'une impulsion pendant le trajet, en ms. Un
+retard de plusieurs ms juste avant un raté désignerait la génération des
+impulsions (Python, système) plutôt que la mécanique.
 """
 
 import sys
 import time
+from pathlib import Path
 
 import _commun
 from _commun import cfg, confirmer, question, titre, voyant
@@ -46,6 +54,9 @@ from libs.moteur import Axe, PortsDrivers
 
 PAUSE_ENTRE_TRAJETS_S = 0.5
 RATES_DE_SUITE_MAX = 3       # au-delà, le rodage s'arrête
+ENREGISTREMENT_TOUS_LES = 20 # trajets entre deux réécritures du fichier de récapitulatif
+FICHIER_RECAP = (Path(cfg.CHEMIN_JOURNAL).parent
+                 / f"rodage_{time.strftime('%Y%m%d_%H%M%S')}.txt")
 CYCLES_PAR_DEFAUT = 10
 
 COUPE, LIGATURAGE = cfg.POSITION_COUPE, cfg.POSITION_LIGATURAGE
@@ -177,7 +188,8 @@ def trajet_synchrone(cible: str) -> tuple:
                     galet[poste] = (axe.pas, maintenant - debut)
                     axe.demander_arret_apres(cfg.MOTEUR_SURCOURSE_PAS)
                 elif axe.pas >= cfg.MOTEUR_DEGAGEMENT_MAX_PAS and c_depart.stable:
-                    echecs[poste] = f"n'a pas quitté la fin de course {depart} après {axe.pas} pas"
+                    echecs[poste] = (f"n'a pas quitté la fin de course {depart} après {axe.pas} pas, "
+                                     f"retard max {axe.retard_max_s * 1000:.1f} ms")
                     axe.demander_arret()           # cet axe seulement : l'autre finit son trajet
             time.sleep(cfg.PERIODE_BOUCLE_S)
     finally:
@@ -188,24 +200,29 @@ def trajet_synchrone(cible: str) -> tuple:
             raise Echec(f"{poste} : génération d'impulsions interrompue ({axe.erreur})")
         if poste not in galet and poste not in echecs:
             echecs[poste] = (f"fin de course {cible} non atteinte en {axe.pas} pas "
-                             f"(budget {cfg.MOTEUR_BUDGET_PAS[poste]})")
-    resultats = {poste: (galet[poste][0], axes[poste].pas, galet[poste][1]) if poste in galet else None
+                             f"(budget {cfg.MOTEUR_BUDGET_PAS[poste]}), "
+                             f"retard max {axe.retard_max_s * 1000:.1f} ms")
+    resultats = {poste: ((galet[poste][0], axes[poste].pas, galet[poste][1],
+                          axes[poste].retard_max_s * 1000) if poste in galet else None)
                  for poste in cfg.POSTES}
     return resultats, echecs
 
 
-def recapitulatif(faits: int) -> None:
-    print("\n  ┌─ RÉCAPITULATIF À M'ENVOYER " + "─" * 46)
-    print(f"  │ {faits} trajet(s) synchrone(s), mode {'LENT' if LENT else 'PROFIL'} — "
-          f"{cfg.DRIVER_PAS_PAR_TOUR} pas/tr, rampes {'en S' if cfg.MOTEUR_RAMPES_EN_S else 'droites'}")
-    print(f"  │ approche {cfg.MOTEUR_VITESSE_APPROCHE_SPS:.0f} pas/s")
+def recapitulatif(faits: int, afficher: bool = True) -> None:
+    """Compose le récapitulatif, l'enregistre dans FICHIER_RECAP, et l'affiche si demandé."""
+    lignes = ["┌─ RÉCAPITULATIF À M'ENVOYER " + "─" * 58]
+    lignes.append(f"│ {time.strftime('%Y-%m-%d %H:%M:%S')} — {faits} trajet(s) synchrone(s), mode "
+                  f"{'LENT' if LENT else 'PROFIL'} — {cfg.DRIVER_PAS_PAR_TOUR} pas/tr, rampes "
+                  f"{'en S' if cfg.MOTEUR_RAMPES_EN_S else 'droites'}, approche "
+                  f"{cfg.MOTEUR_VITESSE_APPROCHE_SPS:.0f} pas/s")
     for poste in cfg.POSTES:
-        print(f"  │ {poste:5s} : course config {cfg.MOTEUR_COURSE_PAS[poste]} pas, max "
-              f"{cfg.MOTEUR_VITESSE_MAX_SPS[poste]:.0f} pas/s (pointe atteinte "
-              f"{cfg.MOTEUR_VITESSE_POINTE_SPS[poste]:.0f}), accél. {cfg.MOTEUR_ACCEL_SPS2[poste]:.0f}, "
-              f"décél. {cfg.MOTEUR_DECEL_SPS2[poste]:.0f} pas/s²")
-    print("  │")
-    print("  │ axe    sens              réussis  ratés  pas au galet (min / moy / max)   durée moy.")
+        lignes.append(f"│ {poste:5s} : course config {cfg.MOTEUR_COURSE_PAS[poste]} pas, max "
+                      f"{cfg.MOTEUR_VITESSE_MAX_SPS[poste]:.0f} pas/s (pointe atteinte "
+                      f"{cfg.MOTEUR_VITESSE_POINTE_SPS[poste]:.0f}), accél. "
+                      f"{cfg.MOTEUR_ACCEL_SPS2[poste]:.0f}, décél. {cfg.MOTEUR_DECEL_SPS2[poste]:.0f} pas/s²")
+    lignes.append("│")
+    lignes.append("│ axe    sens              réussis  ratés  pas au galet (min / moy / max)   "
+                  "durée moy.   retard max")
     for cle in sorted(set(mesures) | set(rates)):
         poste, sens = cle
         liste = mesures.get(cle, [])
@@ -214,19 +231,27 @@ def recapitulatif(faits: int) -> None:
             pas = [m[0] for m in liste]
             durees = [m[2] for m in liste]
             chiffres = (f"{min(pas):5d} / {sum(pas) / len(pas):7.1f} / {max(pas):5d}        "
-                        f"{sum(durees) / len(durees):5.2f} s")
+                        f"{sum(durees) / len(durees):5.2f} s     {max(m[3] for m in liste):6.1f} ms")
         else:
             chiffres = "    —"
-        print(f"  │ {poste:5s}  vers {sens:11s}  {len(liste):^7d}  {nb_rates:^5d}  {chiffres}")
+        lignes.append(f"│ {poste:5s}  vers {sens:11s}  {len(liste):^7d}  {nb_rates:^5d}  {chiffres}")
     total_rates = sum(len(liste) for liste in rates.values())
-    print("  │")
-    print(f"  │ ratés : {total_rates}")
+    lignes.append("│")
+    lignes.append(f"│ ratés : {total_rates}")
     for (poste, sens), liste in sorted(rates.items()):
-        for numero, raison in liste[:15]:
-            print(f"  │   trajet {numero:4d} — {poste} vers {sens} : {raison}")
-        if len(liste) > 15:
-            print(f"  │   … et {len(liste) - 15} autre(s) pour {poste} vers {sens}")
-    print("  └" + "─" * 73)
+        for numero, raison in liste:
+            lignes.append(f"│   trajet {numero:4d} — {poste} vers {sens} : {raison}")
+    lignes.append("└" + "─" * 86)
+    try:
+        FICHIER_RECAP.parent.mkdir(parents=True, exist_ok=True)
+        FICHIER_RECAP.write_text("\n".join(lignes) + "\n", encoding="utf-8")
+    except OSError as erreur:
+        print(f"  (récapitulatif non enregistré : {erreur})")
+    if afficher:
+        print()
+        for ligne in lignes:
+            print("  " + ligne)
+        print(f"  Enregistré dans : {FICHIER_RECAP}")
 
 
 faits = 0
@@ -242,11 +267,14 @@ try:
         raise SystemExit("  Non lancé.")
 
     # ── 2. Allers-retours synchrones ───────────────────────────────────────
-    print("\n   n°  sens             mère : galet / arrêt / durée     fille : galet / arrêt / durée")
+    print(f"  Récapitulatif enregistré au fil de l'eau dans : {FICHIER_RECAP}")
+    print("\n   n°  sens             mère : galet / arrêt / durée / retard     "
+          "fille : galet / arrêt / durée / retard")
+
     def colonne(valeurs) -> str:
         if valeurs is None:
-            return "        R A T É        "
-        return f"{valeurs[0]:5d} / {valeurs[1]:5d} / {valeurs[2]:5.2f} s"
+            return "            R A T É             "
+        return f"{valeurs[0]:5d} / {valeurs[1]:5d} / {valeurs[2]:5.2f} s / {valeurs[3]:4.1f} ms"
 
     cible = LIGATURAGE
     rates_de_suite = 0
@@ -263,6 +291,7 @@ try:
                 rates.setdefault((poste, cible), []).append((numero, raison))
                 print(f"        ✗ raté — {poste} : {raison}")
             rates_de_suite += 1
+            recapitulatif(faits, afficher=False)
             if rates_de_suite >= RATES_DE_SUITE_MAX:
                 raise Echec(f"{RATES_DE_SUITE_MAX} trajets ratés de suite — rodage arrêté")
             print("        remise en position COUPE, puis reprise :")
@@ -272,6 +301,8 @@ try:
         else:
             rates_de_suite = 0
             cible = COUPE if cible == LIGATURAGE else LIGATURAGE
+        if numero % ENREGISTREMENT_TOUS_LES == 0:
+            recapitulatif(faits, afficher=False)
         time.sleep(PAUSE_ENTRE_TRAJETS_S)
     total_rates = sum(len(liste) for liste in rates.values())
     print(f"\n  Rodage terminé : {faits} trajets, {total_rates} raté(s).")

@@ -259,8 +259,10 @@ MOTEUR_REDUCTION = 1.0         # ⚠ À DÉTERMINER — rapport moteur → axe (
 # le 2026-10-08 (test_5_moteur.py : 197–199 pas pour la mère, 531–532 pour la
 # fille, à 1600 pas/tr). ⚠ Les deux courses sont très différentes : à confirmer
 # que c'est voulu mécaniquement.
-# Affiné sur 726 trajets de rodage le 2026-10-08 : moyenne 205 pas (mère), 536 pas (fille).
-MOTEUR_COURSE_DEGRES = {POSTE_MERE: 46.1, POSTE_FILLE: 120.6}
+# Relevé au rodage du 2026-10-08, après repositionnement des fins de course :
+# 197 pas (mère), 558 pas (fille). ⚠ À RE-MESURER À CHAQUE DÉPLACEMENT D'UN CAPTEUR
+# (le récapitulatif de test_7_rodage.py donne la moyenne des « pas au galet »).
+MOTEUR_COURSE_DEGRES = {POSTE_MERE: 44.3, POSTE_FILLE: 125.6}
 
 # Les nombres de pas sont CALCULÉS, jamais saisis : ajuster la course ou la
 # réduction ne demande de toucher qu'une ligne.
@@ -295,10 +297,11 @@ MOTEUR_COURSE_PAS = {poste: round(PAS_PAR_DEGRE * degres)
 # ⚠ À AJUSTER SUR MACHINE — PAR AXE. Les deux axes n'ont ni la même course ni
 # les mêmes frottements : chacun a sa vitesse et ses rampes.
 # 2026-10-08 : accélérations ramenées de 3000 à 1500 pas/s² après un décrochage
-# de la mère au 727e trajet de rodage (course courte, frottements).
-MOTEUR_VITESSE_MAX_SPS = {POSTE_MERE: 600.0, POSTE_FILLE: 600.0}     # pas/s — palier
-MOTEUR_ACCEL_SPS2 = {POSTE_MERE: 1500.0, POSTE_FILLE: 1500.0}        # pas/s² — rampe de montée
-MOTEUR_DECEL_SPS2 = {POSTE_MERE: 1500.0, POSTE_FILLE: 1500.0}        # pas/s² — rampe de descente
+# de la mère au 727e trajet de rodage (course courte, frottements). Puis mère
+# adoucie à part (800 pas/s², 400 pas/s) : jugée trop vive à l'œil pendant le rodage.
+MOTEUR_VITESSE_MAX_SPS = {POSTE_MERE: 400.0, POSTE_FILLE: 600.0}     # pas/s — palier
+MOTEUR_ACCEL_SPS2 = {POSTE_MERE: 800.0, POSTE_FILLE: 1500.0}       # pas/s² — rampe de montée
+MOTEUR_DECEL_SPS2 = {POSTE_MERE: 800.0, POSTE_FILLE: 1500.0}       # pas/s² — rampe de descente
 
 # Commune aux deux axes : vitesse de démarrage, d'approche finale sur le galet,
 # de recherche à l'initialisation.
@@ -469,18 +472,20 @@ COMPTEURS_PERIODE_ECRITURE_S = 30.0
 #  DRIVERS JK-DM860H — RÉGLAGES PHYSIQUES  (documentation, aucune dépendance code)
 # ═══════════════════════════════════════════════════════════════════════════
 # Réglage des DEUX drivers, SW1 → SW8 (1 = ON), d'après le manuel JK-DM860H :
-#   SW1=ON  SW2=ON  SW3=OFF        → 4,28 A RMS / 5,14 A crête
+#   SW1=ON  SW2=OFF SW3=OFF        → 5,43 A RMS / 6,52 A crête (monté le 2026-10-08
+#                                    après décrochages de la mère ; surveiller la chauffe)
 #   SW4=OFF                        → demi-courant à l'arrêt
 #   SW5=ON  SW6=OFF SW7=ON SW8=ON  → 1600 impulsions/tour (= DRIVER_PAS_PAR_TOUR)
-DRIVER_DIP_SWITCH = "11001011"
+DRIVER_DIP_SWITCH = "10001011"
 
 # ⚠ À CONFIRMER : courant nominal sur la plaque du moteur (noté 6,0 A / phase).
 #   Crans SW1/SW2/SW3 du manuel :
 #     OFF/OFF/ON  → 3,71 A RMS / 4,45 A crête  (si ça chauffe et que le couple suffit)
-#     ON/ON/OFF   → 4,28 A RMS / 5,14 A crête  (valeur actuelle, ~70 % de 6 A)
+#     ON/ON/OFF   → 4,28 A RMS / 5,14 A crête  (réglage de départ, ~70 % de 6 A)
+#     ON/OFF/OFF  → 5,43 A RMS / 6,52 A crête  (valeur actuelle)
 #     OFF/ON/OFF  → 4,86 A RMS / 5,83 A crête  (si l'axe décroche)
 #     OFF/OFF/OFF → 6,00 A RMS / 7,20 A crête  (maximum, moteur de 6 A seulement)
-DRIVER_COURANT_CRETE_A = 5.14
+DRIVER_COURANT_CRETE_A = 6.52
 
 # Ce driver n'a PAS de sortie d'alarme : une panne n'est signalée que par sa
 # LED rouge. Les seuls détecteurs logiciels sont D4 (le moteur ne quitte pas sa

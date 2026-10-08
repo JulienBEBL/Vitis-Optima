@@ -108,6 +108,7 @@ class Axe:
         self._surcourse: int | None = None     # écrit par la boucle, lu par le thread
         self.pas = 0                           # écrit par le thread, lu par la boucle
         self.erreur: Exception | None = None   # écrit par le thread, lu par la boucle
+        self.retard_max_s = 0.0                # écrit par le thread : pire retard d'une impulsion
 
     # ── Côté boucle principale ────────────────────────────────────────────
 
@@ -130,6 +131,7 @@ class Axe:
         self._surcourse = None
         self.pas = 0
         self.erreur = None
+        self.retard_max_s = 0.0
         periodes = () if lent else PERIODES_PROFIL[self.poste]
         periode_lente = 1.0 / vitesse_lente_sps if vitesse_lente_sps else PERIODE_APPROCHE
         self._thread = threading.Thread(target=self._impulsions, args=(periodes, periode_lente),
@@ -181,6 +183,12 @@ class Axe:
                 attente = t_prochain - time.perf_counter()
                 if attente > 0:
                     time.sleep(attente)
+                # Diagnostic : de combien cette impulsion part-elle après son
+                # échéance ? Un long retard (Python, système) fige le rotor puis
+                # le relance à pleine vitesse : cause possible de décrochage.
+                retard = time.perf_counter() - t_prochain
+                if retard > self.retard_max_s:
+                    self.retard_max_s = retard
 
                 lgpio.gpio_write(self._puce, self._pul, 1)
                 # Attente active : quelques dizaines de µs, trop court pour sleep().
