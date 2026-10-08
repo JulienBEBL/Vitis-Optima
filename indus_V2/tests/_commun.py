@@ -48,6 +48,37 @@ def ouvrir(avec_gpio: bool = False) -> Materiel:
     return materiel
 
 
+class _LectureSeule:
+    """Les deux MCP d'entrée, ouverts SANS toucher à une seule sortie."""
+
+    def __init__(self, bus, relais, entrees):
+        self.bus, self.relais, self.entrees = bus, relais, entrees
+
+    def fermer(self) -> None:
+        self.bus.fermer()
+
+
+def ouvrir_lecture_seule() -> _LectureSeule:
+    """Pour les tests d'entrées : ne configure QUE les ports d'entrée (direction
+    et pull-ups). Aucun relais, aucun ENA, aucun GPIO n'est écrit, ni à
+    l'ouverture ni à la fermeture."""
+    from libs.materiel import BusI2C, Mcp23017
+    try:
+        cfg.verifier_config()
+        bus = BusI2C(cfg.I2C_BUS_ID)
+        # IODIR = 0x00/0x01, GPPU = 0x0C/0x0D. 0x24 : port B seulement.
+        bus.ecrire(cfg.MCP_RELAIS_ADDR, 0x01, 0xFF)
+        bus.ecrire(cfg.MCP_RELAIS_ADDR, 0x0D, 0xFF)
+        for registre in (0x00, 0x01, 0x0C, 0x0D):
+            bus.ecrire(cfg.MCP_ENTREES_ADDR, registre, 0xFF)
+    except (ValueError, OSError) as erreur:
+        print(f"\n  ERREUR : {erreur}\n  → lancer d'abord test_1_i2c.py\n")
+        sys.exit(1)
+    relais = Mcp23017(bus, cfg.MCP_RELAIS_ADDR, cfg.MCP_RELAIS_IODIR, cfg.MCP_RELAIS_GPPU, (0, 0))
+    entrees = Mcp23017(bus, cfg.MCP_ENTREES_ADDR, cfg.MCP_ENTREES_IODIR, cfg.MCP_ENTREES_GPPU, (0, 0))
+    return _LectureSeule(bus, relais, entrees)
+
+
 def bits(octet: int) -> str:
     """Octet en binaire, bit 7 à gauche : « 7654 3210 »."""
     b = f"{octet:08b}"

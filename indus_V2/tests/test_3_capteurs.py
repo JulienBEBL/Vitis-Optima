@@ -1,63 +1,77 @@
 # -*- coding: utf-8 -*-
 """
-test_3_capteurs.py — Correspondance et polarité des 4 fins de course, repli au débranchement.
+test_3_capteurs.py — Les fins de course : où elles arrivent, dans quel sens.
 
-Aucune sortie activée. Les moteurs sont LIBRES (ENA = 1) : on peut amener les
-axes à la main, si la mécanique le permet.
+Lecture seule : aucun relais, aucun ENA n'est écrit. Ctrl+C pour le bilan.
 
     python3 tests/test_3_capteurs.py
 
-Procédure, pour chaque axe :
-  1. Axe hors des deux positions → les deux voyants de l'axe éteints « ·· ».
-  2. Axe en position COUPE        → seul le voyant COUPE de cet axe allumé.
-  3. Axe en position LIGATURAGE   → seul le voyant LIGATURAGE de cet axe allumé.
-  4. Galet actionné, DÉBRANCHER le connecteur → le voyant doit S'ÉTEINDRE.
-     C'est le repli sûr voulu (contact NO, actif bas) : un fil coupé se lit
-     « pas en position », jamais comme une fausse arrivée.
+Le script ne suppose RIEN de config.py. Il affiche en direct les 8 bits bruts
+de chaque port d'entrée (0x26 A, 0x26 B, 0x24 B) et la liste des bits qui ont
+changé depuis le lancement. Actionner un galet à la main, un par un :
 
-Si un voyant s'allume quand le galet est LIBRE et s'éteint quand il est
-actionné : polarité inversée → CAPTEURS_ACTIFS_BAS, ou câblage NF au lieu de NO.
-Si c'est le voyant d'un autre capteur qui réagit : échanger les CAP_* dans config.py.
+  - un bit doit basculer, et son nom apparaître dans « ont bougé » ;
+  - noter quel bit pour quel galet → CAP_* dans config.py ;
+  - câblage attendu (COM à la masse, contact NO) : le bit vaut 1 galet libre,
+    0 galet actionné. Si c'est l'inverse, le contact câblé est le NC.
+  - galet actionné, débrancher le connecteur : le bit doit revenir à 1.
+
+Si AUCUN bit ne bouge sur aucun port : le signal n'arrive pas au MCP. Vérifier
+que COM est bien relié à la MASSE du PCB (pas au 3,3 V, pas en l'air), que le
+fil NO arrive sur une entrée câblée (0x26 : GPA4..GPA7, GPB0..GPB4), et
+mesurer au multimètre la continuité COM–NO galet actionné.
 """
 
 import time
 
 import _commun
-from _commun import bits, cfg, titre, voyant
-from libs.entrees import Entrees
+from _commun import bits, cfg, titre
 
-CAPTEURS = ((cfg.POSTE_MERE, cfg.POSITION_COUPE), (cfg.POSTE_MERE, cfg.POSITION_LIGATURAGE),
-            (cfg.POSTE_FILLE, cfg.POSITION_COUPE), (cfg.POSTE_FILLE, cfg.POSITION_LIGATURAGE))
+PORTS = ("0x26 A", "0x26 B", "0x24 B")
+ATTENDUS = {("0x26 A", cfg.CAP_MERE_COUPE): "mère coupe",
+            ("0x26 A", cfg.CAP_MERE_LIGATURAGE): "mère ligaturage",
+            ("0x26 A", cfg.CAP_FILLE_COUPE): "fille coupe",
+            ("0x26 A", cfg.CAP_FILLE_LIGATURAGE): "fille ligaturage"}
 
-titre("TEST 3 — FINS DE COURSE")
-print(f"  Polarité configurée : {'actif BAS (contact NO)' if cfg.CAPTEURS_ACTIFS_BAS else 'actif HAUT'}")
-print("  Ctrl+C pour le bilan.\n")
-print("  MÈRE coupe  MÈRE lig.  FILLE coupe  FILLE lig.   0x26 A (bits 7..4 = capteurs)")
+titre("TEST 3 — FINS DE COURSE (bits bruts)")
+materiel = _commun.ouvrir_lecture_seule()
 
-materiel = _commun.ouvrir(avec_gpio=False)
-entrees = Entrees(materiel.relais, materiel.entrees)
-vus = {cle: False for cle in CAPTEURS}
-incoherences = 0
+
+def lire() -> dict:
+    a, b = materiel.entrees.lire_ports()
+    return {"0x26 A": a, "0x26 B": b, "0x24 B": materiel.relais.lire_port(1)}
+
+
 try:
+    depart = lire()
+    bascules = {}                # (port, bit) → nombre de changements
+    precedent = dict(depart)
+    print("  Bits affichés 7654 3210. Actionner les galets un par un.\n")
+    print("  0x26 A      0x26 B      0x24 B      ont bougé")
     while True:
-        entrees.rafraichir(time.monotonic())
-        alerte = ""
-        for poste in cfg.POSTES:
-            if (entrees.capteur(poste, cfg.POSITION_COUPE).stable
-                    and entrees.capteur(poste, cfg.POSITION_LIGATURAGE).stable):
-                alerte = f"  ⚠ {poste} : LES DEUX actifs (défaut D2)"
-                incoherences += 1
-        for cle in CAPTEURS:
-            vus[cle] |= entrees.capteurs[cle].stable
-        print("\r  " + "   ".join(f"   {voyant(entrees.capteurs[cle].stable)}    " for cle in CAPTEURS)
-              + f"  {bits(entrees.octets['0x26_A'])}{alerte:40s}", end="", flush=True)
-        time.sleep(cfg.PERIODE_BOUCLE_S)
+        octets = lire()
+        for port in PORTS:
+            change = octets[port] ^ precedent[port]
+            for bit in range(8):
+                if change & (1 << bit):
+                    bascules[(port, bit)] = bascules.get((port, bit), 0) + 1
+        precedent = octets
+        liste = " ".join(f"{port.replace(' ', '')}{bit}" for (port, bit) in sorted(bascules))
+        print("\r  " + "   ".join(bits(octets[port]) for port in PORTS) + f"   {liste:40s}",
+              end="", flush=True)
+        time.sleep(0.02)
 except KeyboardInterrupt:
-    print("\n\n  Bilan :")
-    for (poste, position), vu in vus.items():
-        print(f"    {poste:6s} {position:11s} {'✓ vu actif' if vu else '✗ jamais vu actif'}")
-    if incoherences:
-        print("    ⚠ deux capteurs d'un même axe ont été vus actifs ensemble")
+    print("\n\n  Bilan — bits qui ont changé :")
+    if not bascules:
+        print("    aucun. Le signal n'arrive pas au MCP : voir l'en-tête de ce script.")
+    for (port, bit), nombre in sorted(bascules.items()):
+        repos = (depart[port] >> bit) & 1
+        role = ATTENDUS.get((port, bit), "non prévu dans config.py")
+        print(f"    {port} bit {bit} : {nombre} changement(s), valait {repos} au lancement — {role}")
+    print("\n  config.py attend actuellement :")
+    for (port, bit), role in ATTENDUS.items():
+        vu = "✓ a bougé" if (port, bit) in bascules else "✗ n'a pas bougé"
+        print(f"    {role:17s} → {port} bit {bit}   {vu}")
     print()
 finally:
     materiel.fermer()
