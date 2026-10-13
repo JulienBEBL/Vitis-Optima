@@ -128,10 +128,10 @@ GPIO_RELAIS_LIBRES = (16, 20)
 #   (V4 CLAUDE.md « LED1→A2 … LED6→A7 »). verifier_config() refuse A0/A1.
 # ⚠ CORRESPONDANCE À CONFIRMER (test_4_relais.py).
 
-EV_BRIDAGE_MERE = 2    # GPA2 — relais 1
+EV_COUPE_FILLE = 2     # GPA2 — relais 1   (relevé sur machine le 2026-10-13)
 EV_COUPE_MERE = 3      # GPA3 — relais 2
-EV_BRIDAGE_FILLE = 4   # GPA4 — relais 3
-EV_COUPE_FILLE = 5     # GPA5 — relais 4
+EV_BRIDAGE_MERE = 4    # GPA4 — relais 3   ⚠ EV en panne au relevé (LED 0,1 s) : à revalider
+EV_BRIDAGE_FILLE = 5   # GPA5 — relais 4
 # GPA6 (relais 5) et GPA7 (relais 6) : libres, maintenus à 0.
 
 
