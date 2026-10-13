@@ -96,7 +96,7 @@ def coup(niveau_dir: int, degres: float, actifs_avant: dict) -> tuple:
     finally:
         axe.demander_arret()
         axe.attendre_fin(cfg.ARRET_THREAD_MAX_S)
-        axe.liberer()
+        axe.relacher()
     if axe.erreur is not None:
         raise RuntimeError(f"génération d'impulsions interrompue : {axe.erreur}")
     return axe.pas, pas_detection, atteinte

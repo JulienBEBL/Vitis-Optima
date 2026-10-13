@@ -127,7 +127,7 @@ def deplacer(axe, entrees, poste: str, cible: str, lent: bool, budget: int) -> t
     finally:
         axe.demander_arret()
         axe.attendre_fin(cfg.ARRET_THREAD_MAX_S)
-        axe.liberer()
+        axe.relacher()     # reste excité si MOTEUR_MAINTIEN_EN_POSITION
     if axe.erreur is not None:
         raise RuntimeError(f"génération d'impulsions interrompue : {axe.erreur}")
     return pas_capteur, axe.pas
@@ -143,5 +143,5 @@ def pas_a_vide(axe, direction: int, nombre: int) -> int:
     finally:
         axe.demander_arret()
         axe.attendre_fin(cfg.ARRET_THREAD_MAX_S)
-        axe.liberer()
+        axe.relacher()     # reste excité si MOTEUR_MAINTIEN_EN_POSITION
     return axe.pas

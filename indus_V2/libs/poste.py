@@ -146,6 +146,9 @@ class Poste:
         if coupe.stable and ligaturage.stable:
             raise Defaut("D2", f"{self.nom} : fins de course coupe ET ligaturage actives")
         if coupe.stable:
+            # Aucun mouvement à faire, mais le moteur doit tenir sa position.
+            if cfg.MOTEUR_MAINTIEN_EN_POSITION:
+                self.axe.exciter()
             self.etat = PRET_COUPE
             self.arrive_a = maintenant
             log.info("%s : déjà en position coupe", self.nom)
@@ -242,8 +245,7 @@ class Poste:
             raise Defaut("D5", f"{self.nom} : fin de course {self._cible} vue puis non confirmée")
 
     def _arrivee(self, maintenant: float) -> None:
-        if not cfg.MOTEUR_MAINTIEN_EN_POSITION:
-            self.axe.liberer()
+        self.axe.relacher()
         self.arrive_a = maintenant
         etat = PRET_LIGATURAGE if self._cible == cfg.POSITION_LIGATURAGE else PRET_COUPE
         message = f"arrivé en position {self._cible} ({self.axe.pas} pas)"

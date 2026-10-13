@@ -235,12 +235,15 @@ DIR_VERS_COUPE = {poste: 1 - niveau for poste, niveau in DIR_VERS_LIGATURAGE.ite
 MOTEUR_ENA_AVANT_DIR_S = 0.010    # laisse le rotor se caler après excitation
 MOTEUR_DIR_AVANT_PAS_S = 0.005    # fiche : DIR stable avant le 1er front (mini 5 µs)
 
-# False : ENA = 1 (moteur libre) dès l'arrivée en position. L'axe n'a pas
-#         besoin de couple de maintien, et deux NEMA 34 excités dissipent une
-#         vingtaine de watts dans le coffret.
-# True  : moteur excité en position — si l'axe dérive sous l'effort de
-#         ligaturage. En défaut et à l'arrêt, ENA = 1 dans tous les cas.
-MOTEUR_MAINTIEN_EN_POSITION = False
+# True  : les moteurs restent EXCITÉS en position (couple de maintien), de
+#         l'initialisation jusqu'à un défaut ou l'arrêt du programme.
+#         Choisi le 2026-10-13 : moteur relâché, la mère reculait de son galet
+#         dès l'arrivée (frottements, élasticité) → défaut D5 à l'arrêt.
+#         SW4 = OFF sur les drivers : le courant de maintien est divisé par deux.
+# False : ENA = 1 (moteur libre) dès l'arrivée en position.
+# Dans les deux cas : moteurs libres avant l'initialisation, en DÉFAUT et à
+# l'arrêt du programme.
+MOTEUR_MAINTIEN_EN_POSITION = True
 
 
 # ═══════════════════════════════════════════════════════════════════════════

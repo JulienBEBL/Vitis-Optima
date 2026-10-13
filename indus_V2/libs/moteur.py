@@ -165,6 +165,15 @@ class Axe:
         """ENA à « libre ». Accès I2C : boucle principale seulement."""
         self._ports.ecrire_ena(self._bit_ena, excite=False)
 
+    def exciter(self) -> None:
+        """ENA à « excité » (couple de maintien). Boucle principale seulement."""
+        self._ports.ecrire_ena(self._bit_ena, excite=True)
+
+    def relacher(self) -> None:
+        """Fin de mouvement : libère le moteur, SAUF si MOTEUR_MAINTIEN_EN_POSITION."""
+        if not cfg.MOTEUR_MAINTIEN_EN_POSITION:
+            self.liberer()
+
     # ── Côté thread d'impulsions ──────────────────────────────────────────
 
     def _impulsions(self, periodes: tuple, periode_lente: float) -> None:

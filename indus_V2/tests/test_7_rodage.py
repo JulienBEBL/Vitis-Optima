@@ -99,7 +99,7 @@ def arreter_tout() -> None:
         axe.demander_arret()
     for axe in axes.values():
         axe.attendre_fin(cfg.ARRET_THREAD_MAX_S)
-        axe.liberer()
+        axe.relacher()
 
 
 def mise_en_coupe(poste: str) -> None:
@@ -144,7 +144,7 @@ def mise_en_coupe(poste: str) -> None:
     finally:
         axe.demander_arret()
         axe.attendre_fin(cfg.ARRET_THREAD_MAX_S)
-        axe.liberer()
+        axe.relacher()
     if axe.erreur is not None:
         raise Echec(f"{poste} : génération d'impulsions interrompue ({axe.erreur})")
     if not arrive:
