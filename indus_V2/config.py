@@ -388,7 +388,7 @@ MOTEUR_BUDGET_PAS = {poste: pas + MOTEUR_MARGE_PAS for poste, pas in MOTEUR_COUR
 #   est REFUSÉ tant que l'esclave n'est pas revenu en position coupe.
 # INITIALISATION : l'esclave est référencé en premier, puis le maître.
 
-MOTEUR_MAITRE = POSTE_MERE     # ⚠ À DÉTERMINER SUR MACHINE — POSTE_MERE ou POSTE_FILLE
+MOTEUR_MAITRE = POSTE_FILLE    # confirmé par Julien le 2026-10-14 : la fille part en ligaturage la première
 RETARD_SENS_ALLER_S = 0.5      # ⚠ À AJUSTER — s, délai APRÈS l'arrivée du maître avant d'accepter l'esclave
 
 

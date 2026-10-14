@@ -261,10 +261,11 @@ compteur de refus incrémenté, bip de refus, ligne de journal.
 | **I2** | Poste disponible | `etat ∈ {PRET_COUPE, PRET_LIGATURAGE}` | les 3 boutons du poste |
 | **I3** | Garde écoulée | `now ≥ poste.libre_a` | les 3 boutons du poste |
 | **I4** | Coupe en position coupe seulement | `etat == PRET_COUPE` | bouton COUPE |
-| **I5** | Bridage en position coupe seulement | `etat == PRET_COUPE` | bouton BRIDAGE |
+| **I5** | Pince : en coupe, fermer ou ouvrir ; en ligaturage, OUVRIR seulement, et seulement les deux axes en ligaturage (un appui ouvre les deux pinces) | voir § 16 | bouton BRIDAGE |
 | **I6** | **Bridé pour partir en ligaturage** | `bridage == BRIDE` | bouton POSITION, sens aller |
 | **I7** | **Ordre à l'aller** | poste esclave : le maître est en position ligaturage **et** `now ≥ maitre.arrive_a + RETARD_SENS_ALLER_S`. Poste maître : l'esclave est en position coupe (garde défensive, voir plus bas) | bouton POSITION, sens aller |
-| **I8** | **Ordre au retour** | poste maître : l'esclave est en position coupe (au repos, ou en train de brider / couper) | bouton POSITION, sens retour |
+| ~~I8~~ | *Remplacé le 2026-10-14 par I9* | | |
+| **I9** | **Pas de retour par POSITION** | en ligaturage, POSITION est refusé : le retour en coupe se fait par ACQUITTEMENT (§ 16) | bouton POSITION, en ligaturage |
 
 I4 et I5 sont redondants avec I2 tant que les seuls états disponibles sont PRET_COUPE et
 PRET_LIGATURAGE. Je les écris quand même : ils expriment ta règle « en POSITION_LIGATURAGE,
@@ -275,6 +276,9 @@ bord.
 retard n'est pas écoulé, l'appui sur POSITION côté esclave est refusé. Rien n'est mémorisé,
 rien ne démarre en différé. Ce qui bouge est toujours ce qu'on vient de demander.
 `RETARD_SENS_ALLER_S` est un délai **après l'arrivée** du maître.
+
+*(Modifié le 2026-10-14, voir § 16 : le retour se fait désormais par ACQUITTEMENT, qui ramène
+toujours l'esclave en premier. Le paragraphe ci-dessous décrit l'ancienne règle I8.)*
 
 **I8 — l'esclave revient en premier.** Le maître ne peut quitter POSITION_LIGATURAGE que si
 l'esclave est déjà en POSITION_COUPE.
@@ -787,3 +791,40 @@ scripts de test ont aussi été exécutés de bout en bout sur ce faux matériel
 
 Ce banc ne remplace pas la machine : il ne dit rien de la gigue réelle des impulsions sur
 la Pi 5, du bruit sur les entrées, ni du comportement mécanique des galets.
+
+---
+
+## 16. Cycle opérateur — modification du 2026-10-14
+
+Décidé avec Julien après les essais de cycle (`test_8_cycle.py`). Remplace la
+fin de cycle d'origine (retour par POSITION, esclave d'abord, puis débridage).
+
+| Étape | Bouton | Effet |
+|---|---|---|
+| 1 | BRIDAGE mère, BRIDAGE fille | ferme chaque pince |
+| 2 | COUPE mère, COUPE fille | coupe, autant de fois que voulu |
+| 3 | POSITION maître | le maître part en ligaturage |
+| 4 | POSITION esclave | l'esclave part (refusé tant que le maître n'est pas arrivé, I7) |
+| 5 | — | ligaturage |
+| 6 | BRIDAGE mère **ou** fille | ouvre les **deux** pinces (un seul double bip) |
+| 7 | ACQUITTEMENT | retour au départ : esclave puis maître en position coupe |
+
+**BRIDAGE en ligaturage** (I5) : accepté seulement si les deux axes sont en
+ligaturage, au repos, pinces fermées. Il ouvre les deux pinces. On ne referme
+jamais une pince hors position coupe. Un seul axe en ligaturage : refusé.
+
+**POSITION en ligaturage** (I9) : refusé. Un axe ne peut plus revenir en coupe
+avec une branche encore pincée ; l'opérateur ne peut plus ramener un axe seul.
+
+**ACQUITTEMENT en marche** = retour au départ, refusé si un poste est en train
+d'agir. Il reprend l'initialisation : relais à 0 (pinces ouvertes), puis, si une
+pince était fermée, attente de `TEMPS_MANOEUVRE_BRIDAGE_S` avant tout mouvement,
+puis référencement de l'esclave et du maître en position coupe. Fonctionne depuis
+les deux axes en ligaturage, depuis un seul, ou depuis la position coupe.
+
+Inchangés : aller en ligaturage (I6, I7), coupe en position coupe seulement (I4),
+appuis refusés pendant une action (I2, I3), ACQUITTEMENT après un défaut.
+
+Vérifié sur banc logiciel (faux matériel) le 2026-10-14 : cycle complet, refus I5
+et I9 avec leur motif, attente d'ouverture des pinces avant mouvement.
+

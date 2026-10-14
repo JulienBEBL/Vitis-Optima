@@ -18,9 +18,8 @@ boutons À TA PLACE, dans l'ordre d'un cycle de greffage :
     3. POSITION maître ......................... le maître part en ligaturage
     4. POSITION esclave ........................ puis l'esclave (après RETARD_SENS_ALLER_S)
     5. pause TEMPS_LIGATURAGE_S ................ (le temps de ligaturer)
-    6. POSITION esclave ........................ l'esclave revient en coupe le premier
-    7. POSITION maître ......................... puis le maître
-    8. BRIDAGE maître, BRIDAGE esclave ......... les deux pinces s'ouvrent
+    6. BRIDAGE maître (un seul appui) .......... les DEUX pinces s'ouvrent (sortie des branches)
+    7. ACQUITTEMENT ............................ retour au départ : esclave puis maître en coupe
 
 Un appui simulé passe par les mêmes interlocks qu'un vrai : s'il est refusé, ou
 si la machine part en défaut, le test s'arrête et dit pourquoi. Les VRAIS
@@ -161,14 +160,19 @@ try:
         print(f"        … ligaturage, pause de {TEMPS_LIGATURAGE_S:.1f} s")
         attendre(TEMPS_LIGATURAGE_S)
 
-        appuyer(esclave, P.POSITION, libre(esclave, P.PRET_COUPE),
-                f"{esclave.nom} → position coupe (esclave d'abord)")
-        appuyer(maitre, P.POSITION, libre(maitre, P.PRET_COUPE),
-                f"{maitre.nom} → position coupe (maître)")
+        appuyer(maitre, P.BRIDAGE,
+                lambda: all(p.etat == P.PRET_LIGATURAGE and not p.bride for p in (maitre, esclave)),
+                "ouverture des deux pinces (un seul appui)")
 
-        for poste in (maitre, esclave):
-            appuyer(poste, P.BRIDAGE, lambda p=poste: p.etat == P.PRET_COUPE and not p.bride,
-                    f"débridage {poste.nom}")
+        # Retour au départ : ACQUITTEMENT en marche, accepté dès qu'aucun poste n'agit.
+        tourner_jusqua(lambda: all(p.etat in (P.PRET_COUPE, P.PRET_LIGATURAGE)
+                                   and time.monotonic() >= p.libre_a for p in (maitre, esclave)),
+                       DELAI_ACTION_MAX_S, "attente de la fin des actions — retour au départ")
+        simules.add("acquittement")
+        tourner_jusqua(lambda: machine.etat == M.INITIALISATION, 2, "départ du retour au départ")
+        duree = tourner_jusqua(lambda: machine.etat == M.MARCHE, 60, "retour au départ")
+        print(f"      ✓ {'retour au départ (ACQUITTEMENT)':46s} {duree:5.2f} s")
+        durees.setdefault("retour au départ (ACQUITTEMENT)", []).append(duree)
 
         faits += 1
         print(f"      cycle {numero} terminé en {time.monotonic() - debut_cycle:.1f} s")

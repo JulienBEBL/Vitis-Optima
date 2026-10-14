@@ -91,13 +91,19 @@ class Poste:
         self._arret_a = None        # instant de détection de la fin de course cible
         self._referencement = False
         self._perte_depuis = None   # D5 : début de disparition de la fin de course
+        self._apres_bridage = PRET_COUPE  # état de repos à retrouver après la manœuvre de pince
+        self._bip_fin_bridage = True
 
     # ── Lecture de l'état ─────────────────────────────────────────────────
 
     @property
     def position(self) -> str | None:
         """Position mécanique connue, ou None (mouvement, non initialisé)."""
-        if self.etat in (PRET_COUPE, OCCUPE_BRIDAGE, OCCUPE_COUPE):
+        if self.etat == OCCUPE_BRIDAGE:
+            # La pince se manœuvre sur place : en coupe, ou en ligaturage (ouverture de fin de cycle).
+            return (cfg.POSITION_LIGATURAGE if self._apres_bridage == PRET_LIGATURAGE
+                    else cfg.POSITION_COUPE)
+        if self.etat in (PRET_COUPE, OCCUPE_COUPE):
             return cfg.POSITION_COUPE
         if self.etat == PRET_LIGATURAGE:
             return cfg.POSITION_LIGATURAGE
@@ -117,15 +123,27 @@ class Poste:
             return "I3 — temps de garde après action non écoulé"
         if action == COUPE and self.etat != PRET_COUPE:
             return "I4 — coupe interdite hors position coupe"
-        if action == BRIDAGE and self.etat != PRET_COUPE:
-            return "I5 — bridage figé hors position coupe"
+        if action == BRIDAGE and self.etat == PRET_LIGATURAGE and not self.bride:
+            # En ligaturage, la pince ne fait que s'OUVRIR (fin de cycle). On ne la
+            # referme pas hors position coupe. La condition « les deux axes en
+            # ligaturage » est vérifiée par le coordinateur.
+            return "I5 — pince déjà ouverte, on ne la referme pas hors position coupe"
+        if action == POSITION and self.etat == PRET_LIGATURAGE:
+            return "I9 — retour en position coupe par ACQUITTEMENT seulement"
         if action == POSITION and self.etat == PRET_COUPE and not self.bride:
             return "I6 — brider avant de partir en ligaturage"
         return None
 
     # ── Lancement des actions (appelé par le coordinateur, interlocks vérifiés) ──
 
-    def lancer_bridage(self, maintenant: float) -> None:
+    def lancer_bridage(self, maintenant: float, bip_fin: bool = True) -> None:
+        """Bascule la pince. En coupe : fermer ou ouvrir. En ligaturage : ouvrir.
+
+        `bip_fin` = False quand les deux pinces s'ouvrent ensemble sur un seul
+        appui : un seul double bip pour une seule action opérateur.
+        """
+        self._apres_bridage = self.etat
+        self._bip_fin_bridage = bip_fin
         self.ev_bridage = not self.ev_bridage
         self.etat = OCCUPE_BRIDAGE
         self._echeance = maintenant + cfg.TEMPS_MANOEUVRE_BRIDAGE_S
@@ -183,8 +201,8 @@ class Poste:
         if self.etat == OCCUPE_BRIDAGE:
             if maintenant >= self._echeance:
                 self.bride = self.ev_bridage
-                self._terminer(maintenant, PRET_COUPE, f"ev_bridage_{self.nom}",
-                               "bridé" if self.bride else "débridé")
+                self._terminer(maintenant, self._apres_bridage, f"ev_bridage_{self.nom}",
+                               "bridé" if self.bride else "débridé", bip=self._bip_fin_bridage)
         elif self.etat == OCCUPE_COUPE:
             self._avancer_coupe(maintenant)
         elif self.etat == OCCUPE_MOUVEMENT:

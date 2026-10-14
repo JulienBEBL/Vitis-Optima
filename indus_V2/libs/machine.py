@@ -28,7 +28,7 @@ from libs.materiel import PORT_A, Buzzer, Materiel
 from libs.entrees import Entrees
 from libs.journal import Compteurs
 from libs.moteur import PortsDrivers
-from libs.poste import (BRIDAGE, COUPE, DESCRIPTION_DEFAUTS, POSITION, PRET_COUPE,
+from libs.poste import (BRIDAGE, COUPE, DESCRIPTION_DEFAUTS, POSITION, PRET_COUPE, PRET_LIGATURAGE,
                         Defaut, Poste)
 
 log = logging.getLogger("vitis")
@@ -58,7 +58,8 @@ class Machine:
                          cfg.POSTE_FILLE: (cfg.EV_BRIDAGE_FILLE, cfg.EV_COUPE_FILLE)}
 
         self.etat = ATTENTE_ACQUITTEMENT
-        self._phase_init = None                 # "esclave" | "maitre"
+        self._phase_init = None                 # "pinces" | "esclave" | "maitre"
+        self._fin_ouverture_pinces = 0.0
         self._prochaine_verif_mcp = 0.0
         self._ecarts_mcp: dict[int, int] = {}   # adresse → relectures fausses consécutives
         self._bus_en_erreur = False
@@ -115,6 +116,15 @@ class Machine:
             if self.etat in (ATTENTE_ACQUITTEMENT, DEFAUT):
                 self._accepter("acquittement")
                 self._entrer_initialisation(maintenant)
+            elif self.etat == MARCHE:
+                # Retour au départ : seulement si aucun poste n'est en train d'agir.
+                occupes = [p.nom for p in self._postes
+                           if p.etat not in (PRET_COUPE, PRET_LIGATURAGE) or maintenant < p.libre_a]
+                if occupes:
+                    self._refuser("acquittement", f"action en cours ({', '.join(occupes)})")
+                else:
+                    self._accepter("acquittement")
+                    self._entrer_initialisation(maintenant, retour_au_depart=True)
             else:
                 self._refuser("acquittement", f"sans effet en {self.etat}")
 
@@ -128,7 +138,12 @@ class Machine:
                     self._refuser(nom, motif)
                     continue
                 self._accepter(nom)
-                if action == BRIDAGE:
+                if action == BRIDAGE and poste.etat == PRET_LIGATURAGE:
+                    # Fin de cycle : un seul appui ouvre les DEUX pinces.
+                    log.info("Fin de cycle : ouverture des deux pinces")
+                    poste.lancer_bridage(maintenant)
+                    self._autre(poste).lancer_bridage(maintenant, bip_fin=False)
+                elif action == BRIDAGE:
                     poste.lancer_bridage(maintenant)
                 elif action == COUPE:
                     poste.lancer_coupe(maintenant)
@@ -140,8 +155,18 @@ class Machine:
         if self.etat != MARCHE:
             return f"I1 — machine en {self.etat}"
         motif = poste.refus_local(action, maintenant)
-        if motif or action != POSITION:
+        if motif:
             return motif
+        if action == BRIDAGE and poste.etat == PRET_LIGATURAGE:
+            autre = self._autre(poste)
+            if autre.etat != PRET_LIGATURAGE:
+                return f"I5 — ouverture des pinces seulement les deux axes en ligaturage ({autre.nom} n'y est pas)"
+            motif_autre = autre.refus_local(BRIDAGE, maintenant)
+            if motif_autre:
+                return f"{autre.nom} : {motif_autre}"
+            return None
+        if action != POSITION:
+            return None
 
         aller = poste.etat == PRET_COUPE
         if aller and poste is self.esclave:
@@ -151,11 +176,12 @@ class Machine:
                 return "I7 — délai après l'arrivée du maître non écoulé"
         if aller and poste is self.maitre and self.esclave.position != cfg.POSITION_COUPE:
             # Garde défensive : l'esclave hors position coupe avec le maître en
-            # coupe est inatteignable en marche normale (I7 + I8 l'interdisent).
+            # coupe est inatteignable (le retour se fait toujours esclave d'abord).
             return f"I7 — l'esclave ({self.esclave.nom}) doit être en position coupe"
-        if not aller and poste is self.maitre and self.esclave.position != cfg.POSITION_COUPE:
-            return f"I8 — l'esclave ({self.esclave.nom}) doit revenir en position coupe d'abord"
         return None
+
+    def _autre(self, poste: Poste) -> Poste:
+        return self.esclave if poste is self.maitre else self.maitre
 
     def _accepter(self, nom: str) -> None:
         self._compteurs.bouton(nom, accepte=True)
@@ -170,15 +196,32 @@ class Machine:
     #  INITIALISATION  (esclave puis maître)
     # ═══════════════════════════════════════════════════════════════════════
 
-    def _entrer_initialisation(self, maintenant: float) -> None:
-        log.info("Initialisation : référencement %s puis %s", self.esclave.nom, self.maitre.nom)
+    def _entrer_initialisation(self, maintenant: float, retour_au_depart: bool = False) -> None:
+        """Au démarrage, après un défaut, ou en marche (retour au départ).
+
+        Hors MARCHE, les relais sont à 0 : les pinces s'ouvrent. Si une pince était
+        fermée, on attend TEMPS_MANOEUVRE_BRIDAGE_S avant de bouger un axe : il ne
+        doit jamais partir en tirant sur une branche encore pincée.
+        """
+        pince_fermee = any(poste.ev_bridage or poste.bride for poste in self._postes)
+        log.info("%s : %sréférencement %s puis %s",
+                 "Retour au départ" if retour_au_depart else "Initialisation",
+                 "ouverture des pinces, puis " if pince_fermee else "",
+                 self.esclave.nom, self.maitre.nom)
         self.etat = INITIALISATION
         for poste in self._postes:
-            poste.neutraliser()                 # repart d'un état propre
-        self._phase_init = "esclave"
-        self.esclave.lancer_referencement(maintenant)
+            poste.neutraliser()                 # repart d'un état propre, pinces ouvertes
+        if pince_fermee:
+            self._phase_init = "pinces"
+            self._fin_ouverture_pinces = maintenant + cfg.TEMPS_MANOEUVRE_BRIDAGE_S
+        else:
+            self._phase_init = "esclave"
+            self.esclave.lancer_referencement(maintenant)
 
     def _avancer_initialisation(self, maintenant: float) -> None:
+        if self._phase_init == "pinces" and maintenant >= self._fin_ouverture_pinces:
+            self._phase_init = "esclave"
+            self.esclave.lancer_referencement(maintenant)
         if self._phase_init == "esclave" and self.esclave.etat == PRET_COUPE:
             self._phase_init = "maitre"
             self.maitre.lancer_referencement(maintenant)

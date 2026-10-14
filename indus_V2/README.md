@@ -36,17 +36,18 @@ Le service systemd n'est pas encore basculé sur ce programme (phase 3).
 | Étape | Ce qui se passe |
 |---|---|
 | Mise sous tension | Relais à 0, moteurs libres. La machine attend. |
-| **ACQUITTEMENT** | Initialisation : l'esclave revient en position coupe, puis le maître. Double bip = machine prête. |
-| **BRIDAGE** | Bascule bridé ↔ débridé. En position coupe seulement. |
+| **ACQUITTEMENT** | Au démarrage, après un défaut, ou en fin de cycle : ouvre les pinces, puis l'esclave revient en position coupe, puis le maître. Double bip = machine prête. |
+| **BRIDAGE** | En position coupe : ferme ou ouvre la pince. Les deux axes en ligaturage : ouvre les DEUX pinces. |
 | **COUPE** | Attente, impulsion de coupe, attente. En position coupe seulement, bridé ou non. |
-| **POSITION** | Bascule position coupe ↔ position ligaturage. Il faut être bridé pour partir en ligaturage. |
+| **POSITION** | Envoie l'axe en position ligaturage. Il faut être bridé. Sans effet en ligaturage : le retour se fait par ACQUITTEMENT. |
 
 Ordre entre les postes (`MOTEUR_MAITRE` dans config.py) :
 - **aller** : le maître d'abord ; l'esclave est refusé tant que le maître n'est pas arrivé
   depuis `RETARD_SENS_ALLER_S` ;
-- **retour** : l'esclave d'abord ; le maître est refusé tant que l'esclave n'est pas revenu.
+- **fin de cycle** : BRIDAGE (mère ou fille) ouvre les deux pinces, puis ACQUITTEMENT ramène
+  l'esclave puis le maître en position coupe.
 
-En position ligaturage, COUPE et BRIDAGE sont refusés. Tout appui pendant une action est refusé.
+En position ligaturage, COUPE et POSITION sont refusés. Tout appui pendant une action est refusé.
 
 | Son | Signification |
 |---|---|
@@ -113,10 +114,10 @@ l'accélération et la décélération ne tiennent pas dans la course : le messa
 | 19 | COUPE maître, plusieurs fois | Chaque coupe complète, double bip ; appuis pendant la coupe refusés |
 | 20 | POSITION esclave (bridé), maître en coupe | Refusé (I7) |
 | 21 | POSITION maître | Le maître part en ligaturage ; double bip à l'arrivée |
-| 22 | COUPE et BRIDAGE maître en ligaturage | Refusés (I4, I5) |
+| 22 | COUPE et BRIDAGE maître en ligaturage, esclave encore en coupe | Refusés (I4, I5) |
 | 23 | POSITION esclave aussitôt, puis après `RETARD_SENS_ALLER_S` | Refusé, puis accepté |
-| 24 | POSITION maître, esclave en ligaturage | Refusé (I8) |
-| 25 | POSITION esclave, puis POSITION maître | Retour dans cet ordre |
+| 24 | POSITION maître ou esclave, en ligaturage | Refusé (I9) |
+| 25 | BRIDAGE mère, puis ACQUITTEMENT | Les deux pinces s'ouvrent ; puis l'esclave et le maître reviennent en coupe |
 | 26 | `Ctrl+C` pendant un mouvement | Le moteur s'arrête, relais à 0, moteurs libres |
 
 Après chaque action refusée, le motif est dans le journal.
