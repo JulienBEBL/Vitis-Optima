@@ -2,3 +2,5 @@ __pycache__/
 *.pyc
 indus_V2/logs/
 indus_V2/etat/
+indus_V3/logs/
+indus_V3/etat/
