@@ -2,7 +2,7 @@
 """
 materiel.py — Couche matérielle basse : bus I2C, MCP23017, puce GPIO, buzzer.
 
-Origine :
+Repris tel quel de indus V2 (le PCB n'a pas changé). Origine :
   BusI2C      ← Clean-and-Protech V4 libs/i2c_bus.py (retry sur OSError)
                 et Vitis V1 indus/mcp23017.py (_write / _read)
   Mcp23017    ← Clean-and-Protech V4 libs/mcp23017.py (registres BANK = 0)

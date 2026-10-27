@@ -1,31 +1,34 @@
 # -*- coding: utf-8 -*-
 """
-test_8_cycle.py — Cycle complet automatique : toutes les actions, dans le bon ordre.
+test_8_cycle.py — Cycle complet automatique, les deux postes en même temps.
 
-⚠ CE TEST FAIT TOUT BOUGER : pinces, lames, les deux moteurs. Arrêt d'urgence à
-   portée de main, mains hors de la machine. Tests 4 (EV) et 7 (rodage) validés.
+⚠ CE TEST FAIT TOUT BOUGER : mandrins, lames, les deux moteurs. Arrêt d'urgence
+   à portée de main, mains hors de la machine, SANS branche. Tests 4 (EV) et 7
+   (rodage) validés.
 
     python3 tests/test_8_cycle.py
 
-Ce test fait tourner LE VRAI PROGRAMME (la même machine à états que main.py,
-avec ses interlocks, ses défauts, son buzzer, son journal) et appuie sur les
-boutons À TA PLACE, dans l'ordre d'un cycle de greffage :
+Ce test fait tourner LE VRAI PROGRAMME (la même boucle que main.py, avec ses
+interlocks, ses défauts, son buzzer, son journal) et appuie sur les boutons À
+TA PLACE — y compris le MAINTIEN des boutons de rotation. Les deux postes font
+le même cycle en même temps, chacun de son côté :
 
-    0. ACQUITTEMENT ............ initialisation, les deux axes en position coupe
-    puis, à chaque cycle :
-    1. BRIDAGE maître, BRIDAGE esclave ......... les deux pinces se ferment
-    2. COUPE maître et COUPE esclave ........... les lames coupent (ensemble)
-    3. POSITION maître ......................... le maître part en ligaturage
-    4. POSITION esclave ........................ puis l'esclave (après RETARD_SENS_ALLER_S)
-    5. pause TEMPS_LIGATURAGE_S ................ (le temps de ligaturer)
-    6. BRIDAGE maître (un seul appui) .......... les DEUX pinces s'ouvrent (sortie des branches)
-    7. ACQUITTEMENT ............................ retour au départ : esclave puis maître en coupe
+    0. ACQUITTEMENT .............. initialisation des deux postes
+    puis, à chaque cycle, pour chaque poste :
+    1. COUPE, mandrin ouvert ..... doit être REFUSÉE (I3)
+    2. BRIDAGE ................... le mandrin se ferme
+    3. ROTATION + tenu ROTATION_TENUE_S, puis relâché
+    4. ROTATION − tenu 2 × ROTATION_TENUE_S, puis relâché
+    5. COUPE ..................... séquence de coupe
+    6. BRIDAGE ................... le mandrin s'ouvre
+    7. ACQUITTEMENT .............. retour au centre des deux mandrins
 
-Un appui simulé passe par les mêmes interlocks qu'un vrai : s'il est refusé, ou
-si la machine part en défaut, le test s'arrête et dit pourquoi. Les VRAIS
-boutons restent actifs pendant le test : ne pas y toucher.
+Le déplacement manuel du bloc sur le guide de translation n'est pas simulé.
+Un appui simulé passe par les mêmes interlocks qu'un vrai : s'il est refusé
+(alors qu'il devait être accepté), ou si un poste part en défaut, le test
+s'arrête et dit pourquoi. Les VRAIS boutons restent actifs : ne pas y toucher.
 
-Les appuis simulés sont comptés comme des appuis dans etat/compteurs.json.
+Les appuis simulés ne sont pas comptés dans etat/compteurs.json.
 """
 
 import sys
@@ -34,33 +37,36 @@ from pathlib import Path
 
 import _commun
 from _commun import cfg, confirmer, question, titre
-from libs import machine as M
 from libs import poste as P
+from libs.entrees import ACQUITTEMENT, BRIDAGE, COUPE, ROTATION_MOINS, ROTATION_PLUS
 from libs.journal import configurer_journal
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import main as programme                                   # noqa: E402
 
-TEMPS_LIGATURAGE_S = 2.0      # pause en position ligaturage, à chaque cycle
+ROTATION_TENUE_S = 1.5        # durée de maintien de ROTATION +, à chaque cycle
 PAUSE_ENTRE_CYCLES_S = 1.0
-DELAI_ACTION_MAX_S = 15.0     # au-delà, une action est considérée comme bloquée
+DELAI_ACTION_MAX_S = 20.0     # au-delà, une action est considérée comme bloquée
 CYCLES_PAR_DEFAUT = 3
 
 titre("TEST 8 — CYCLE COMPLET AUTOMATIQUE")
-print("  ⚠ Pinces, lames et moteurs vont bouger. Mains hors de la machine.")
+print("  ⚠ Mandrins, lames et moteurs vont bouger. Mains hors de la machine, sans branche.")
 reponse = question(f"Nombre de cycles [{CYCLES_PAR_DEFAUT}] ?")
 cycles = int(reponse) if reponse.isdigit() and int(reponse) > 0 else CYCLES_PAR_DEFAUT
 
 materiel = _commun.ouvrir(avec_gpio=True)
 configurer_journal()
 sys.setswitchinterval(cfg.PYTHON_SWITCH_INTERVAL_S)
-machine = programme._construire_machine(materiel)
-maitre, esclave = machine.maitre, machine.esclave
+machine = programme._construire_machine(materiel, compteurs=_commun.CompteursMuets())
+postes = list(machine.postes.values())
+entrees = machine._entrees
 
-# Appuis simulés : la machine demande « ce bouton vient-il d'être appuyé ? »,
-# on répond oui une fois pour le bouton voulu. Les vrais boutons restent lus.
+# Appuis simulés : la machine demande « ce bouton vient-il d'être appuyé ? » et
+# le poste « ce bouton est-il tenu ? ». On répond oui pour les boutons voulus ;
+# les vrais boutons restent lus.
 simules = set()
-_vrai_appui = machine._entrees.appui
+tenus = set()
+_vrai_appui, _vrai_tenu = entrees.appui, entrees.tenu
 
 
 def _appui(nom: str) -> bool:
@@ -70,7 +76,8 @@ def _appui(nom: str) -> bool:
     return _vrai_appui(nom)
 
 
-machine._entrees.appui = _appui
+entrees.appui = _appui
+entrees.tenu = lambda nom: nom in tenus or _vrai_tenu(nom)
 
 
 class Arret(Exception):
@@ -84,8 +91,9 @@ def tourner_jusqua(condition, delai_s: float, quoi: str) -> float:
     while True:
         maintenant = time.monotonic()
         machine.tour(maintenant)
-        if machine.etat == M.DEFAUT:
-            raise Arret(f"la machine est passée en DÉFAUT pendant : {quoi} (voir la ligne DÉFAUT ci-dessus)")
+        en_defaut = [p.nom for p in postes if p.etat == P.DEFAUT]
+        if en_defaut:
+            raise Arret(f"{', '.join(en_defaut)} en DÉFAUT pendant : {quoi} (voir la ligne DÉFAUT ci-dessus)")
         if condition():
             return maintenant - debut
         if maintenant - debut > delai_s:
@@ -98,97 +106,106 @@ def tourner_jusqua(condition, delai_s: float, quoi: str) -> float:
             prochain = time.monotonic()
 
 
-def attendre(duree_s: float) -> None:
+def attendre(duree_s: float, quoi: str = "pause") -> None:
     fin = time.monotonic() + duree_s
-    tourner_jusqua(lambda: time.monotonic() >= fin, duree_s + 5, "pause")
+    tourner_jusqua(lambda: time.monotonic() >= fin, duree_s + 5, quoi)
 
 
-def appuyer(poste, action: str, condition, quoi: str) -> float:
-    """Attend que le programme accepte l'action (interlocks), appuie, attend le résultat."""
-    tourner_jusqua(lambda: machine._motif_refus(poste, action, time.monotonic()) is None,
+def tous_prets() -> bool:
+    maintenant = time.monotonic()
+    return all(p.etat == P.PRET and maintenant >= p.libre_a for p in postes)
+
+
+def appuyer_tous(action: str, condition, quoi: str) -> None:
+    """Appuie `action` sur les deux postes en même temps, attend `condition` sur chacun."""
+    tourner_jusqua(lambda: all(p.refus(action, time.monotonic()) is None for p in postes),
                    DELAI_ACTION_MAX_S, f"attente de l'autorisation — {quoi}")
-    simules.add(f"{action}_{poste.nom}")
-    duree = tourner_jusqua(condition, DELAI_ACTION_MAX_S, quoi)
-    print(f"      ✓ {quoi:46s} {duree:5.2f} s")
-    durees.setdefault(quoi, []).append(duree)
-    return duree
+    simules.update(f"{action}_{p.nom}" for p in postes)
+    duree = tourner_jusqua(lambda: all(condition(p) for p in postes) and tous_prets(),
+                           DELAI_ACTION_MAX_S, quoi)
+    noter(quoi, duree)
 
 
-def libre(poste, etat: str):
-    """Condition : le poste est revenu dans `etat` (action terminée)."""
-    return lambda: poste.etat == etat
+def tenir_tous(action: str, duree_s: float, quoi: str) -> None:
+    """Maintient le bouton de rotation des deux postes `duree_s`, puis le relâche."""
+    tourner_jusqua(tous_prets, DELAI_ACTION_MAX_S, f"attente — {quoi}")
+    noms = {f"{action}_{p.nom}" for p in postes}
+    debut = {p.nom: p.position for p in postes}
+    tenus.update(noms)
+    simules.update(noms)
+    attendre(0.2, quoi)
+    refuses = [p.nom for p in postes if p.etat != P.ROTATION]
+    if refuses:
+        raise Arret(f"{quoi} : rotation refusée pour {', '.join(refuses)} (motif dans le journal)")
+    attendre(duree_s - 0.2, quoi)
+    tenus.difference_update(noms)
+    duree = tourner_jusqua(tous_prets, DELAI_ACTION_MAX_S, f"arrêt — {quoi}")
+    deplacements = ", ".join(f"{p.nom} {(p.position - debut[p.nom]) / cfg.PAS_PAR_DEGRE:+.1f}°"
+                             for p in postes)
+    noter(f"{quoi} ({deplacements})", duree_s + duree, cle=quoi)
+
+
+def noter(quoi: str, duree: float, cle: str | None = None) -> None:
+    print(f"      ✓ {quoi:58s} {duree:5.2f} s")
+    durees.setdefault(cle or quoi, []).append(duree)
 
 
 durees = {}
 faits = 0
 try:
-    if not confirmer(f"Zone dégagée, lancer {cycles} cycle(s) (maître = {maitre.nom}) ?"):
+    if not confirmer(f"Zone dégagée, sans branche, lancer {cycles} cycle(s) ?"):
         raise SystemExit("  Non lancé.")
 
     # ── 0. Initialisation ──────────────────────────────────────────────────
     print("\n  Initialisation (ACQUITTEMENT) :")
     tourner_jusqua(lambda: True, 1, "démarrage")
-    simules.add("acquittement")
-    duree = tourner_jusqua(lambda: machine.etat == M.MARCHE, 60, "initialisation")
-    print(f"      ✓ machine prête, les deux axes en position coupe         {duree:5.2f} s")
+    simules.add(ACQUITTEMENT)
+    duree = tourner_jusqua(tous_prets, 120, "initialisation")
+    noter("deux postes initialisés et centrés", duree)
 
     for numero in range(1, cycles + 1):
         print(f"\n  Cycle {numero} / {cycles} :")
         debut_cycle = time.monotonic()
 
-        for poste in (maitre, esclave):
-            appuyer(poste, P.BRIDAGE, lambda p=poste: p.etat == P.PRET_COUPE and p.bride,
-                    f"bridage {poste.nom}")
+        motifs = [p.refus(COUPE, time.monotonic()) for p in postes]
+        if not all(m and m.startswith("I3") for m in motifs):
+            raise Arret(f"COUPE mandrin ouvert devait être refusée (I3) : {motifs}")
+        simules.update(f"{COUPE}_{p.nom}" for p in postes)
+        attendre(0.2, "coupe mandrin ouvert")
+        if not all(p.etat == P.PRET and not p.ev_coupe for p in postes):
+            raise Arret("une coupe est partie mandrin ouvert")
+        print(f"      ✓ {'coupe mandrin ouvert refusée (I3)':58s}")
 
-        # Les deux coupes partent ensemble : les postes sont indépendants.
-        tourner_jusqua(lambda: all(machine._motif_refus(p, P.COUPE, time.monotonic()) is None
-                                   for p in (maitre, esclave)),
-                       DELAI_ACTION_MAX_S, "attente de l'autorisation — coupes")
-        simules.update({f"coupe_{maitre.nom}", f"coupe_{esclave.nom}"})
-        tourner_jusqua(lambda: maitre.etat == P.OCCUPE_COUPE and esclave.etat == P.OCCUPE_COUPE,
-                       2, "départ des deux coupes")
-        duree = tourner_jusqua(lambda: maitre.etat == P.PRET_COUPE and esclave.etat == P.PRET_COUPE,
-                               DELAI_ACTION_MAX_S, "coupe mère + coupe fille")
-        print(f"      ✓ {'coupe mère + coupe fille (ensemble)':46s} {duree:5.2f} s")
-        durees.setdefault("coupe mère + coupe fille (ensemble)", []).append(duree)
+        appuyer_tous(BRIDAGE, lambda p: p.mandrin_ferme, "fermeture des mandrins")
+        tenir_tous(ROTATION_PLUS, ROTATION_TENUE_S, "ROTATION + tenue")
+        tenir_tous(ROTATION_MOINS, 2 * ROTATION_TENUE_S, "ROTATION − tenue")
+        appuyer_tous(COUPE, lambda p: not p.ev_coupe, "coupe")
+        appuyer_tous(BRIDAGE, lambda p: not p.mandrin_ferme, "ouverture des mandrins")
 
-        appuyer(maitre, P.POSITION, libre(maitre, P.PRET_LIGATURAGE),
-                f"{maitre.nom} → position ligaturage (maître)")
-        appuyer(esclave, P.POSITION, libre(esclave, P.PRET_LIGATURAGE),
-                f"{esclave.nom} → position ligaturage (esclave)")
-
-        print(f"        … ligaturage, pause de {TEMPS_LIGATURAGE_S:.1f} s")
-        attendre(TEMPS_LIGATURAGE_S)
-
-        appuyer(maitre, P.BRIDAGE,
-                lambda: all(p.etat == P.PRET_LIGATURAGE and not p.bride for p in (maitre, esclave)),
-                "ouverture des deux pinces (un seul appui)")
-
-        # Retour au départ : ACQUITTEMENT en marche, accepté dès qu'aucun poste n'agit.
-        tourner_jusqua(lambda: all(p.etat in (P.PRET_COUPE, P.PRET_LIGATURAGE)
-                                   and time.monotonic() >= p.libre_a for p in (maitre, esclave)),
-                       DELAI_ACTION_MAX_S, "attente de la fin des actions — retour au départ")
-        simules.add("acquittement")
-        tourner_jusqua(lambda: machine.etat == M.INITIALISATION, 2, "départ du retour au départ")
-        duree = tourner_jusqua(lambda: machine.etat == M.MARCHE, 60, "retour au départ")
-        print(f"      ✓ {'retour au départ (ACQUITTEMENT)':46s} {duree:5.2f} s")
-        durees.setdefault("retour au départ (ACQUITTEMENT)", []).append(duree)
+        tourner_jusqua(tous_prets, DELAI_ACTION_MAX_S, "attente — recentrage")
+        simules.add(ACQUITTEMENT)
+        tourner_jusqua(lambda: all(p.etat == P.RECENTRAGE for p in postes) or tous_prets(), 2,
+                       "départ du recentrage")
+        duree = tourner_jusqua(tous_prets, DELAI_ACTION_MAX_S, "recentrage")
+        noter("recentrage (ACQUITTEMENT) : " + ", ".join(f"{p.nom} {p.degres(p.position)}" for p in postes),
+              duree, cle="recentrage (ACQUITTEMENT)")
 
         faits += 1
         print(f"      cycle {numero} terminé en {time.monotonic() - debut_cycle:.1f} s")
         if numero < cycles:
             attendre(PAUSE_ENTRE_CYCLES_S)
-    print(f"\n  {faits} cycle(s) complet(s), sans défaut ni refus.")
+    print(f"\n  {faits} cycle(s) complet(s), sans défaut ni refus inattendu.")
 except Arret as arret:
     print(f"\n  ✗ ARRÊT : {arret}")
 except KeyboardInterrupt:
     print("\n  Interrompu.")
 finally:
+    tenus.clear()
     machine.arreter()
     materiel.fermer()
     if durees:
         print("\n  ┌─ RÉCAPITULATIF À M'ENVOYER " + "─" * 46)
-        print(f"  │ {faits} cycle(s) complet(s) sur {cycles} demandé(s) — maître : {maitre.nom}")
+        print(f"  │ {faits} cycle(s) complet(s) sur {cycles} demandé(s)")
         print("  │")
         print("  │ action                                          fois   durée moy.   min / max")
         for quoi, liste in durees.items():

@@ -1,23 +1,26 @@
 # -*- coding: utf-8 -*-
 """
-poste.py — Machine à états d'un poste (mère ou fille). LOGIQUE.md § 3.2 et § 4.2.
+poste.py — Machine à états d'un poste (mère ou fille). LOGIQUE.md § 3 à § 6.
 
-Un poste possède son bridage, sa coupe et son axe. Il applique ses propres
-interlocks (I2 à I6) et détecte ses propres défauts (D1 à D5, D8). Il ne
-connaît NI l'autre poste, NI l'état global : c'est le coordinateur (machine.py)
-qui décide si une demande est autorisée, puis qui appelle lancer_*().
+Un poste possède son mandrin, sa coupe et son moteur de rotation. Il applique
+ses interlocks (I1 à I5) et détecte ses défauts (D1, D2, D4, D5, D8, D9). Il ne
+connaît PAS l'autre poste : en V3 les deux postes sont totalement
+indépendants. machine.py ne fait que lui transmettre les appuis.
 
-Règle centrale (LOGIQUE.md § 2.2) : une commande d'actionneur n'est jamais
-instantanée. Chaque action a une durée ; l'état de l'actionneur (bridé,
-position) ne change qu'à la FIN de l'action ; pendant l'action le poste est
-occupé et ses boutons sont refusés. La variable ne peut jamais être en avance
-sur le vérin.
+Règle centrale (LOGIQUE.md § 2) : une commande d'actionneur n'est jamais
+instantanée. Chaque action a une durée ; l'état de l'actionneur (mandrin
+fermé, position) ne change qu'à la FIN de l'action ; pendant l'action le poste
+est occupé et ses boutons sont refusés.
 
-Le poste n'écrit AUCUNE sortie relais : il expose ev_bridage et ev_coupe, et le
-coordinateur compose l'octet du port. Seul l'axe (ENA / DIR) est piloté d'ici.
+Position : comptée en pas depuis la butée ANTIHORAIRE (0 = butée antihoraire,
+`plage` = butée horaire), mesurée à l'initialisation, recalée à chaque arrivée
+sur une butée.
 
-Origine : Vitis V1 indus/vitis_optima.py, classe `Machine` (actions gardées,
-échéance non bloquante de `surveiller_coupe()`), réécrite en machine à états.
+Le poste n'écrit AUCUNE sortie relais : il expose ev_mandrin et ev_coupe, et
+machine.py compose l'octet du port. Seul le moteur (ENA / DIR) est piloté d'ici.
+
+Origine : indus V2 libs/poste.py (machine à états, séquence de coupe, garde
+après action, surveillance D2 / D5), réécrit pour la rotation du mandrin.
 """
 
 from __future__ import annotations
@@ -25,14 +28,14 @@ from __future__ import annotations
 import logging
 
 import config as cfg
-from libs.entrees import Filtre
-from libs.moteur import Axe
+from libs.entrees import BRIDAGE, COUPE, ROTATION_MOINS, ROTATION_PLUS, Entrees
+from libs.moteur import Axe, periodes_rampe, periodes_vers_position
 
 log = logging.getLogger("vitis")
 
 
 class Defaut(Exception):
-    """Défaut machine. Levé n'importe où, traité en un seul endroit par le coordinateur."""
+    """Défaut d'un poste. Levé n'importe où dans le poste, traité par machine.py."""
 
     def __init__(self, code: str, detail: str) -> None:
         super().__init__(f"{code} — {detail}")
@@ -41,280 +44,510 @@ class Defaut(Exception):
 
 
 DESCRIPTION_DEFAUTS = {
-    "D1": "fin de course cible non atteinte (budget de pas épuisé)",
-    "D2": "deux fins de course actives sur le même axe",
-    "D3": "fin de course cible déjà active au départ",
-    "D4": "fin de course de départ toujours active : le moteur ne tourne pas",
-    "D5": "fin de course perdue à l'arrêt, ou non confirmée à l'arrivée",
+    "D1": "butée non vue : la rotation a dépassé la plage + la marge (protection du tuyau)",
+    "D2": "les deux butées du même poste actives",
+    "D4": "butée de départ toujours active : le moteur ne tourne pas",
+    "D5": "butée inattendue, perdue à l'arrêt, ou non confirmée à l'arrivée",
     "D6": "erreur de bus I2C",
     "D7": "configuration d'un MCP23017 perdue",
-    "D8": "initialisation : position coupe non atteinte",
+    "D8": "initialisation : butée non trouvée",
+    "D9": "initialisation : plage mesurée hors tolérance",
 }
 
-# États de séquence
-NON_INITIALISE = "NON_INITIALISE"
-PRET_COUPE = "PRET_COUPE"
-OCCUPE_BRIDAGE = "OCCUPE_BRIDAGE"
-OCCUPE_COUPE = "OCCUPE_COUPE"
-OCCUPE_MOUVEMENT = "OCCUPE_MOUVEMENT"
-PRET_LIGATURAGE = "PRET_LIGATURAGE"
+# États (LOGIQUE.md § 3)
+ATTENTE_ACQUITTEMENT = "ATTENTE_ACQUITTEMENT"
+INITIALISATION = "INITIALISATION"
+PRET = "PRET"
+MANOEUVRE_MANDRIN = "MANOEUVRE_MANDRIN"
+COUPE_EN_COURS = "COUPE"
+ROTATION = "ROTATION"
+RECENTRAGE = "RECENTRAGE"
+DEFAUT = "DEFAUT"
 
-# Actions demandées par les boutons
-BRIDAGE = "bridage"
-COUPE = "coupe"
-POSITION = "position"
+# Moteur arrêté, position connue : la surveillance D5 « à l'arrêt » s'applique.
+_ETATS_AU_REPOS = (PRET, MANOEUVRE_MANDRIN, COUPE_EN_COURS)
+
+# Modes de fin d'un mouvement
+_SUR_BUTEE = "butée"          # s'arrête sur la butée du sens de rotation
+_SUR_COMPTE = "compte"        # s'arrête sur un nombre de pas (profil fermé)
+_AU_RELACHEMENT = "maintien"  # s'arrête au relâchement du bouton, ou sur la butée
+_DEGAGEMENT = "dégagement"    # quitte la butée de départ, puis RECUL_CONFIRMATION_PAS de plus
+
+
+def _signe(sens: str) -> int:
+    return 1 if sens == cfg.SENS_HORAIRE else -1
 
 
 class Poste:
 
-    def __init__(self, nom: str, axe: Axe, capteur_coupe: Filtre, capteur_ligaturage: Filtre,
-                 compteurs, buzzer) -> None:
+    def __init__(self, nom: str, axe: Axe, entrees: Entrees, compteurs, buzzer) -> None:
         self.nom = nom
         self.axe = axe
-        self._capteurs = {cfg.POSITION_COUPE: capteur_coupe,
-                          cfg.POSITION_LIGATURAGE: capteur_ligaturage}
+        self._entrees = entrees
+        self._butees = {sens: entrees.butee(nom, sens) for sens in cfg.SENS}
         self._compteurs = compteurs
         self._buzzer = buzzer
 
-        self.etat = NON_INITIALISE
-        self.bride = False          # état RETENU, ne change qu'en fin de manœuvre
-        self.ev_bridage = False     # sortie commandée
+        self.etat = ATTENTE_ACQUITTEMENT
+        self.mandrin_ferme = False  # état RETENU, ne change qu'en fin de manœuvre
+        self.ev_mandrin = False     # sortie commandée
         self.ev_coupe = False       # sortie commandée
-        self.libre_a = 0.0          # instant à partir duquel un appui est accepté (I3)
-        self.arrive_a = 0.0         # instant d'arrivée dans la position courante (I7)
+        self.libre_a = 0.0          # instant à partir duquel un appui est accepté (I2)
+        self.plage: int | None = None   # pas entre les deux butées, mesurée à l'initialisation
 
-        self._echeance = 0.0        # fin de la phase en cours (bridage, coupe)
-        self._phase_coupe = None    # "avant" | "impulsion" | "apres"
-        self._cible = None          # position visée pendant un mouvement
-        self._capteur_depart = None # surveillé pour D4, None en recherche lente
-        self._budget_recale = False # budget déjà recalé sur le relâchement du galet de départ
-        self._arret_a = None        # instant de détection de la fin de course cible
-        self._referencement = False
-        self._perte_depuis = None   # D5 : début de disparition de la fin de course
-        self._apres_bridage = PRET_COUPE  # état de repos à retrouver après la manœuvre de pince
-        self._bip_fin_bridage = True
+        self._pos = 0               # compteur de pas signé (+ = horaire), origine arbitraire
+        self._zero: int | None = None   # valeur de _pos sur la butée antihoraire
+        self._echeance = 0.0        # fin de la phase en cours
+        self._phase: str | None = None
+        self._mvt: dict | None = None
+        self._cotes: tuple = ()     # initialisation : ordre des deux butées
+        self._cote = 0
+        # Initialisation : point de détection de chaque butée (compteur de pas),
+        # en passe rapide et en passe lente. Lus par test_6 pour le diagnostic.
+        self.detection_rapide: dict = {}
+        self.repere_lent: dict = {}
+        self._repos_ref = None      # D5 à l'arrêt : état des butées au début du repos
+        self._repos_ecart_depuis = None
+        self.dernier_ecart_recalage: int | None = None   # lu par le rodage (test_7)
 
     # ── Lecture de l'état ─────────────────────────────────────────────────
 
     @property
-    def position(self) -> str | None:
-        """Position mécanique connue, ou None (mouvement, non initialisé)."""
-        if self.etat == OCCUPE_BRIDAGE:
-            # La pince se manœuvre sur place : en coupe, ou en ligaturage (ouverture de fin de cycle).
-            return (cfg.POSITION_LIGATURAGE if self._apres_bridage == PRET_LIGATURAGE
-                    else cfg.POSITION_COUPE)
-        if self.etat in (PRET_COUPE, OCCUPE_COUPE):
-            return cfg.POSITION_COUPE
-        if self.etat == PRET_LIGATURAGE:
-            return cfg.POSITION_LIGATURAGE
-        return None
+    def position(self) -> int | None:
+        """Pas depuis la butée antihoraire, ou None (non initialisé)."""
+        if self._zero is None:
+            return None
+        return self._position_courante() - self._zero
 
     @property
     def en_mouvement(self) -> bool:
-        return self.etat == OCCUPE_MOUVEMENT or self.axe.en_marche
+        return self._mvt is not None or self.axe.en_marche
 
-    # ── Interlocks locaux (I2 à I6) ───────────────────────────────────────
+    def degres(self, pas: int | None) -> str:
+        return "?" if pas is None else f"{pas / cfg.PAS_PAR_DEGRE:.1f}°"
 
-    def refus_local(self, action: str, maintenant: float) -> str | None:
-        """Motif de refus, ou None si le poste accepte l'action."""
-        if self.etat not in (PRET_COUPE, PRET_LIGATURAGE):
+    def _position_courante(self) -> int:
+        if self._mvt is None:
+            return self._pos
+        return self._mvt["origine"] + _signe(self._mvt["sens"]) * self.axe.pas
+
+    def sens_du_bouton(self, action: str) -> str:
+        plus = cfg.SENS_ROTATION_PLUS[self.nom]
+        return plus if action == ROTATION_PLUS else cfg.sens_oppose(plus)
+
+    # ── Interlocks (LOGIQUE.md § 5) ───────────────────────────────────────
+
+    def refus(self, action: str, maintenant: float) -> str | None:
+        """Motif de refus d'un bouton du poste, ou None si l'action est acceptée."""
+        if self.etat in (ATTENTE_ACQUITTEMENT, INITIALISATION, DEFAUT):
+            return f"I1 — poste non initialisé ({self.etat})"
+        if self.etat != PRET:
             return f"I2 — poste occupé ({self.etat})"
         if maintenant < self.libre_a:
-            return "I3 — temps de garde après action non écoulé"
-        if action == COUPE and self.etat != PRET_COUPE:
-            return "I4 — coupe interdite hors position coupe"
-        if action == BRIDAGE and self.etat == PRET_LIGATURAGE and not self.bride:
-            # En ligaturage, la pince ne fait que s'OUVRIR (fin de cycle). On ne la
-            # referme pas hors position coupe. La condition « les deux axes en
-            # ligaturage » est vérifiée par le coordinateur.
-            return "I5 — pince déjà ouverte, on ne la referme pas hors position coupe"
-        if action == POSITION and self.etat == PRET_LIGATURAGE:
-            return "I9 — retour en position coupe par ACQUITTEMENT seulement"
-        if action == POSITION and self.etat == PRET_COUPE and not self.bride:
-            return "I6 — brider avant de partir en ligaturage"
+            return "I2 — temps de garde après action non écoulé"
+        if action == COUPE and not self.mandrin_ferme:
+            return "I3 — coupe interdite mandrin ouvert"
+        if action in (ROTATION_PLUS, ROTATION_MOINS):
+            sens = self.sens_du_bouton(action)
+            butee = self._butees[sens]
+            if butee.stable or butee.brut or self._budget_rotation(sens) <= 0:
+                return f"I4 — butée {sens} atteinte, seul le sens opposé est accepté"
+            autre = ROTATION_MOINS if action == ROTATION_PLUS else ROTATION_PLUS
+            if self._entrees.tenu(f"{autre}_{self.nom}"):
+                return "I5 — les deux boutons de rotation sont enfoncés"
         return None
 
-    # ── Lancement des actions (appelé par le coordinateur, interlocks vérifiés) ──
+    def refus_acquittement(self, maintenant: float) -> str | None:
+        """ACQUITTEMENT : initialisation hors marche, recentrage en PRET, refusé sinon."""
+        if self.etat in (ATTENTE_ACQUITTEMENT, DEFAUT):
+            return None
+        if self.etat != PRET:
+            return f"I2 — poste occupé ({self.etat})"
+        if maintenant < self.libre_a:
+            return "I2 — temps de garde après action non écoulé"
+        return None
 
-    def lancer_bridage(self, maintenant: float, bip_fin: bool = True) -> None:
-        """Bascule la pince. En coupe : fermer ou ouvrir. En ligaturage : ouvrir.
+    # ── Lancement des actions (interlocks déjà vérifiés) ──────────────────
 
-        `bip_fin` = False quand les deux pinces s'ouvrent ensemble sur un seul
-        appui : un seul double bip pour une seule action opérateur.
-        """
-        self._apres_bridage = self.etat
-        self._bip_fin_bridage = bip_fin
-        self.ev_bridage = not self.ev_bridage
-        self.etat = OCCUPE_BRIDAGE
-        self._echeance = maintenant + cfg.TEMPS_MANOEUVRE_BRIDAGE_S
+    def lancer(self, action: str, maintenant: float) -> None:
+        if action == BRIDAGE:
+            self.ev_mandrin = not self.ev_mandrin
+            self.etat = MANOEUVRE_MANDRIN
+            self._echeance = maintenant + cfg.TEMPS_MANOEUVRE_MANDRIN_S
+        elif action == COUPE:
+            self.etat = COUPE_EN_COURS
+            self._phase = "avant"
+            self._echeance = maintenant + cfg.TEMPS_AVANT_COUPE_S
+        else:
+            bouton = f"{action}_{self.nom}"
+            self.lancer_rotation(self.sens_du_bouton(action), bouton)
 
-    def lancer_coupe(self, maintenant: float) -> None:
-        self.etat = OCCUPE_COUPE
-        self._phase_coupe = "avant"
-        self._echeance = maintenant + cfg.TEMPS_AVANT_COUPE_S
+    def lancer_rotation(self, sens: str, bouton: str | None = None) -> None:
+        """Rotation à la vitesse de croisière. `bouton` : arrêt à son relâchement ;
+        None : jusqu'à la butée (rodage). Bornée par la protection du tuyau."""
+        self._demarrer(sens, _AU_RELACHEMENT if bouton else _SUR_BUTEE,
+                       self._budget_rotation(sens),
+                       periodes_rampe(cfg.VITESSE_CROISIERE_SPS), 1.0 / cfg.VITESSE_CROISIERE_SPS,
+                       bouton=bouton, code_budget="D1", code_inattendu="D5")
+        self.etat = ROTATION
 
-    def lancer_mouvement(self, maintenant: float) -> None:
-        cible = cfg.POSITION_LIGATURAGE if self.etat == PRET_COUPE else cfg.POSITION_COUPE
-        self._demarrer(cible, lent=False, referencement=False)
+    def acquitter(self, maintenant: float) -> None:
+        """ACQUITTEMENT accepté : initialisation complète, ou recentrage en marche."""
+        if self.etat == PRET:
+            self._lancer_recentrage(maintenant)
+        else:
+            self._lancer_initialisation(maintenant)
 
-    def lancer_referencement(self, maintenant: float) -> None:
-        """Ramène l'axe en POSITION_COUPE (LOGIQUE.md § 4.1)."""
-        coupe = self._capteurs[cfg.POSITION_COUPE]
-        ligaturage = self._capteurs[cfg.POSITION_LIGATURAGE]
-        if coupe.stable and ligaturage.stable:
-            raise Defaut("D2", f"{self.nom} : fins de course coupe ET ligaturage actives")
-        if coupe.stable:
-            # Aucun mouvement à faire, mais le moteur doit tenir sa position.
-            if cfg.MOTEUR_MAINTIEN_EN_POSITION:
-                self.axe.exciter()
-            self.etat = PRET_COUPE
-            self.arrive_a = maintenant
-            log.info("%s : déjà en position coupe", self.nom)
-            return
-        # Depuis la fin de course ligaturage : profil normal. Depuis une position
-        # inconnue (arrêt en pleine course) : recherche lente, bornée par le budget.
-        lent = not ligaturage.stable
-        log.info("%s : référencement vers la position coupe (%s)", self.nom,
-                 "recherche lente" if lent else "depuis la position ligaturage")
-        self._demarrer(cfg.POSITION_COUPE, lent=lent, referencement=True)
+    def neutraliser(self, etat: str = DEFAUT) -> None:
+        """Défaut ou arrêt : ordre d'arrêt au moteur, sorties commandées à 0, position oubliée.
 
-    def neutraliser(self) -> None:
-        """Défaut ou arrêt : ordre d'arrêt à l'axe, sorties commandées à 0, état oublié.
-
-        L'attente de fin du thread et l'écriture de ENA sont faites par le
-        coordinateur, qui traite les deux postes ensemble.
+        L'attente de fin du thread, l'écriture des relais et de ENA sont faites
+        par machine.py.
         """
         self.axe.demander_arret()
-        self.ev_bridage = False
+        self.ev_mandrin = False
         self.ev_coupe = False
-        self.bride = False          # relais à 0 → débridé
-        self.etat = NON_INITIALISE
-        self._phase_coupe = None
-        self._cible = None
-        self._arret_a = None
-        self._perte_depuis = None
+        self.mandrin_ferme = False      # relais à 0 → mandrin ouvert
+        self.etat = etat
+        self._phase = None
+        self._mvt = None
+        self._zero = None
+        self.plage = None
+        self._repos_ref = None
+
+    def _budget_rotation(self, sens: str) -> int:
+        """Pas autorisés dans `sens` depuis la position : jusqu'à la butée + la marge."""
+        if self.position is None or self.plage is None:
+            return 0
+        if sens == cfg.SENS_HORAIRE:
+            return self.plage + cfg.MARGE_DEPASSEMENT_PAS - self.position
+        return self.position + cfg.MARGE_DEPASSEMENT_PAS
 
     # ── Progression, appelée à chaque tour de boucle ──────────────────────
 
     def avancer(self, maintenant: float) -> None:
-        """Fait progresser l'action en cours et surveille les capteurs. Lève Defaut."""
-        if self.etat == OCCUPE_BRIDAGE:
+        """Fait progresser l'action en cours et surveille les butées. Lève Defaut."""
+        if self.etat in (ATTENTE_ACQUITTEMENT, DEFAUT):
+            return
+        if self.etat == MANOEUVRE_MANDRIN:
             if maintenant >= self._echeance:
-                self.bride = self.ev_bridage
-                self._terminer(maintenant, self._apres_bridage, f"ev_bridage_{self.nom}",
-                               "bridé" if self.bride else "débridé", bip=self._bip_fin_bridage)
-        elif self.etat == OCCUPE_COUPE:
+                self.mandrin_ferme = self.ev_mandrin
+                self._terminer(maintenant, f"ev_mandrin_{self.nom}",
+                               "mandrin fermé" if self.mandrin_ferme else "mandrin ouvert")
+        elif self.etat == COUPE_EN_COURS:
             self._avancer_coupe(maintenant)
-        elif self.etat == OCCUPE_MOUVEMENT:
-            self._avancer_mouvement(maintenant)
-        self._surveiller_capteurs(maintenant)
+        elif self.etat == ROTATION:
+            self._avancer_rotation(maintenant)
+        elif self.etat == RECENTRAGE:
+            self._avancer_recentrage(maintenant)
+        elif self.etat == INITIALISATION:
+            self._avancer_initialisation(maintenant)
+        self._surveiller_butees(maintenant)
 
-    def _avancer_coupe(self, maintenant: float) -> None:
-        if maintenant < self._echeance:
-            return
-        if self._phase_coupe == "avant":
-            self.ev_coupe = True
-            self._phase_coupe = "impulsion"
-            self._echeance = maintenant + cfg.TEMPS_COUPE_S
-        elif self._phase_coupe == "impulsion":
-            self.ev_coupe = False
-            self._phase_coupe = "apres"
-            self._echeance = maintenant + cfg.TEMPS_APRES_COUPE_S
-        else:
-            self._phase_coupe = None
-            self._terminer(maintenant, PRET_COUPE, f"ev_coupe_{self.nom}", "coupe terminée")
-
-    def _avancer_mouvement(self, maintenant: float) -> None:
-        cible = self._capteurs[self._cible]
-        if self.axe.erreur is not None:
-            raise Defaut("D1", f"{self.nom} : génération d'impulsions interrompue ({self.axe.erreur})")
-
-        if self._arret_a is None:
-            # Le galet de départ vient de se relâcher : l'axe est sur son point de
-            # déclenchement, à une course nominale de la cible. Le budget repart
-            # de là, pour que la marge au-delà de la cible vaille toujours
-            # MOTEUR_MARGE_DEG — même si l'axe a démarré loin derrière son galet
-            # (après un défaut D1). Avant ce relâchement, D4 borne le mouvement.
-            if self._capteur_depart is not None and not self._budget_recale \
-                    and not self._capteur_depart.brut:
-                self.axe.etendre_budget(self.axe.pas + cfg.MOTEUR_BUDGET_PAS[self.nom])
-                self._budget_recale = True
-
-            # En marche : on attend la fin de course cible.
-            if cible.consecutifs >= cfg.CAPTEUR_LECTURES_ARRET:
-                self.axe.demander_arret_apres(cfg.MOTEUR_SURCOURSE_PAS)
-                self._arret_a = maintenant
-            elif not self.axe.en_marche:
-                # Le thread s'est arrêté seul : budget épuisé.
-                raise Defaut("D8" if self._referencement else "D1",
-                             f"{self.nom} : fin de course {self._cible} non atteinte "
-                             f"en {self.axe.pas} pas")
-            elif (self._capteur_depart is not None
-                  and self.axe.pas >= cfg.MOTEUR_DEGAGEMENT_MAX_PAS
-                  and self._capteur_depart.stable):
-                raise Defaut("D4", f"{self.nom} : fin de course de départ toujours active "
-                                   f"après {self.axe.pas} pas")
-            return
-
-        # Arrêt demandé : surcourse en cours, puis confirmation par stabilité.
-        if not self.axe.en_marche and cible.stable:
-            self._arrivee(maintenant)
-        elif maintenant - self._arret_a > cfg.CONFIRMATION_CAPTEUR_MAX_S:
-            raise Defaut("D5", f"{self.nom} : fin de course {self._cible} vue puis non confirmée")
-
-    def _arrivee(self, maintenant: float) -> None:
-        self.axe.relacher()
-        self.arrive_a = maintenant
-        etat = PRET_LIGATURAGE if self._cible == cfg.POSITION_LIGATURAGE else PRET_COUPE
-        message = f"arrivé en position {self._cible} ({self.axe.pas} pas)"
-        referencement = self._referencement
-        self._cible = None
-        self._arret_a = None
-        self._referencement = False
-        # Pas de double bip au référencement : c'est « machine prête » qui le donne.
-        self._terminer(maintenant, etat, f"moteur_{self.nom}", message, bip=not referencement)
-
-    def _terminer(self, maintenant: float, etat: str, compteur: str, message: str,
-                  bip: bool = True) -> None:
+    def _terminer(self, maintenant: float, compteur: str | None, message: str,
+                  garde: float = cfg.TEMPS_GARDE_APRES_ACTION_S, bip: bool = True) -> None:
         """Fin commune de toute action : état, garde, compteur, double bip, journal."""
-        self.etat = etat
-        self.libre_a = maintenant + cfg.TEMPS_GARDE_APRES_ACTION_S
-        self._compteurs.actionneur(compteur)
+        self.etat = PRET
+        self._phase = None
+        self.libre_a = maintenant + garde
+        if compteur:
+            self._compteurs.actionneur(compteur)
         if bip:
             self._buzzer.double_bip()
         log.info("%s : %s", self.nom, message)
 
-    def _demarrer(self, cible: str, lent: bool, referencement: bool) -> None:
-        depart = (cfg.POSITION_COUPE if cible == cfg.POSITION_LIGATURAGE
-                  else cfg.POSITION_LIGATURAGE)
-        capteur_cible = self._capteurs[cible]
-        if capteur_cible.brut or capteur_cible.stable:
-            raise Defaut("D3", f"{self.nom} : fin de course {cible} déjà active avant le départ")
-        capteur_depart = self._capteurs[depart]
-        self._capteur_depart = capteur_depart if capteur_depart.stable else None
-        self._budget_recale = False
+    def _avancer_coupe(self, maintenant: float) -> None:
+        """Séquence de coupe, inchangée depuis la V2 (LOGIQUE.md § 3.5)."""
+        if maintenant < self._echeance:
+            return
+        if self._phase == "avant":
+            self.ev_coupe = True
+            self._phase = "impulsion"
+            self._echeance = maintenant + cfg.TEMPS_COUPE_S
+        elif self._phase == "impulsion":
+            self.ev_coupe = False
+            self._phase = "apres"
+            self._echeance = maintenant + cfg.TEMPS_APRES_COUPE_S
+        else:
+            self._terminer(maintenant, f"ev_coupe_{self.nom}", "coupe terminée")
 
-        direction = (cfg.DIR_VERS_LIGATURAGE if cible == cfg.POSITION_LIGATURAGE
-                     else cfg.DIR_VERS_COUPE)[self.nom]
-        self.axe.preparer(direction)
-        self.axe.lancer(cfg.MOTEUR_BUDGET_PAS[self.nom], lent)
-        self.etat = OCCUPE_MOUVEMENT
-        self._cible = cible
-        self._arret_a = None
-        self._referencement = referencement
+    # ── Rotation ──────────────────────────────────────────────────────────
 
-    # ── Surveillance permanente des capteurs (D2, D5) ─────────────────────
+    def _avancer_rotation(self, maintenant: float) -> None:
+        fin = self._avancer_mouvement(maintenant)
+        if fin is None:
+            return
+        sens = fin["sens"]
+        if fin["raison"] == _SUR_BUTEE:
+            self._recaler(fin)
+            self._buzzer.bip_court()
+            message = f"rotation {sens} jusqu'à la butée"
+        else:
+            message = f"rotation {sens}, arrêt à {self.degres(self.position)}"
+        self._terminer(maintenant, f"rotations_{self.nom}", message,
+                       garde=cfg.TEMPS_GARDE_APRES_ROTATION_S, bip=False)
 
-    def _surveiller_capteurs(self, maintenant: float) -> None:
-        coupe = self._capteurs[cfg.POSITION_COUPE]
-        ligaturage = self._capteurs[cfg.POSITION_LIGATURAGE]
-        if coupe.stable and ligaturage.stable:
-            raise Defaut("D2", f"{self.nom} : fins de course coupe ET ligaturage actives")
+    def _recaler(self, fin: dict) -> None:
+        """Arrivée confirmée sur une butée : la position devient exacte.
 
-        attendue = self.position
-        if attendue is None or self._capteurs[attendue].stable:
-            self._perte_depuis = None
-        elif self._perte_depuis is None:
-            self._perte_depuis = maintenant
-        elif maintenant - self._perte_depuis >= cfg.TOLERANCE_PERTE_CAPTEUR_S:
-            raise Defaut("D5", f"{self.nom} : fin de course {attendue} perdue à l'arrêt")
+        La référence est le point de DÉTECTION de la butée, comme à
+        l'initialisation ; les quelques pas faits après la détection (retard
+        d'arrêt) sont gardés en plus.
+        """
+        sens = fin["sens"]
+        attendue = self.plage if sens == cfg.SENS_HORAIRE else 0
+        ecart = (fin["detection"] - self._zero) - attendue
+        if abs(ecart) > cfg.ECART_RECALAGE_MAX_PAS:
+            # Pas de défaut (100 % manuel) : une piste pour le diagnostic de pas perdus.
+            log.warning("%s : butée %s vue à %+d pas (%+.2f°) de la position comptée — recalage",
+                        self.nom, sens, ecart, ecart / cfg.PAS_PAR_DEGRE)
+        self._pos -= ecart
+        self.dernier_ecart_recalage = ecart
+
+    # ── Recentrage (ACQUITTEMENT en marche, LOGIQUE.md § 3.4) ─────────────
+
+    def _lancer_recentrage(self, maintenant: float) -> None:
+        self.etat = RECENTRAGE
+        self._phase = "ouverture"
+        self._echeance = maintenant
+        if self.ev_mandrin or self.mandrin_ferme:
+            # Le mandrin s'ouvre AVANT de tourner : une branche serrée serait vrillée.
+            self.ev_mandrin = False
+            self._echeance = maintenant + cfg.TEMPS_MANOEUVRE_MANDRIN_S
+            self._compteurs.actionneur(f"ev_mandrin_{self.nom}")
+            log.info("%s : recentrage — ouverture du mandrin d'abord", self.nom)
+
+    def _avancer_recentrage(self, maintenant: float) -> None:
+        if self._phase == "ouverture":
+            if maintenant < self._echeance:
+                return
+            self.mandrin_ferme = False
+            self._phase = "deplacement"
+            if not self._deplacer_vers(self.plage // 2):
+                self._terminer(maintenant, None, f"déjà au centre ({self.degres(self.position)})")
+            return
+        if self._avancer_mouvement(maintenant) is not None:
+            self._terminer(maintenant, f"rotations_{self.nom}",
+                           f"recentré à {self.degres(self.position)}")
+
+    def _deplacer_vers(self, cible: int) -> bool:
+        """Profil fermé jusqu'à la position `cible`. False si déjà à la tolérance près."""
+        ecart = cible - self.position
+        if abs(ecart) <= cfg.TOLERANCE_CENTRE_PAS:
+            return False
+        sens = cfg.SENS_HORAIRE if ecart > 0 else cfg.SENS_ANTIHORAIRE
+        self._demarrer(sens, _SUR_COMPTE, abs(ecart),
+                       periodes_vers_position(abs(ecart), cfg.VITESSE_RECENTRAGE_SPS),
+                       1.0 / cfg.VITESSE_RECENTRAGE_SPS, code_budget="D1", code_inattendu="D5")
+        return True
+
+    # ── Initialisation : deux butées en deux passes, puis centrage (§ 3.1) ──
+
+    def _lancer_initialisation(self, maintenant: float) -> None:
+        mandrin_a_ouvrir = self.ev_mandrin or self.mandrin_ferme
+        self.neutraliser(INITIALISATION)            # relais à 0 : le mandrin s'ouvre
+        self._pos = 0
+        self.detection_rapide = {}
+        self.repere_lent = {}
+        self._cotes = (cfg.INIT_PREMIER_SENS, cfg.sens_oppose(cfg.INIT_PREMIER_SENS))
+        self._cote = 0
+        self.axe.exciter()
+        attente = cfg.MOTEUR_ENA_AVANT_DIR_S
+        if mandrin_a_ouvrir:
+            attente = max(attente, cfg.TEMPS_MANOEUVRE_MANDRIN_S)
+        self._phase = "ouverture"
+        self._echeance = maintenant + attente
+        log.info("%s : initialisation — %srecherche des butées %s puis %s, puis centrage",
+                 self.nom, "ouverture du mandrin, " if mandrin_a_ouvrir else "",
+                 self._cotes[0], self._cotes[1])
+
+    def _avancer_initialisation(self, maintenant: float) -> None:
+        if self._phase == "ouverture":
+            if maintenant >= self._echeance:
+                self.mandrin_ferme = False
+                self._passe_rapide()
+            return
+        fin = self._avancer_mouvement(maintenant)
+        if fin is None:
+            return
+        sens = self._cotes[self._cote]
+        if self._phase == "rapide":
+            self.detection_rapide[sens] = fin["detection"]
+            self._recul(sens)
+        elif self._phase == "recul":
+            if self._butees[sens].brut:
+                raise Defaut("D4", f"{self.nom} : butée {sens} toujours active après un recul de "
+                                   f"{cfg.RECUL_CONFIRMATION_DEG:.1f}°")
+            self._phase = "lente"
+            self._demarrer(sens, _SUR_BUTEE, cfg.BUDGET_CONFIRMATION_PAS, (),
+                           1.0 / cfg.VITESSE_RECHERCHE_LENTE_SPS,
+                           code_budget="D8", code_inattendu="D8")
+        elif self._phase == "lente":
+            self.repere_lent[sens] = fin["detection"]
+            rapide = self.detection_rapide.get(sens)
+            if rapide is not None:
+                ecart = _signe(sens) * (rapide - fin["detection"])
+                log.info("%s : butée %s confirmée en passe lente (écart avec la passe rapide %+.2f°)",
+                         self.nom, sens, ecart / cfg.PAS_PAR_DEGRE)
+            else:
+                log.info("%s : butée %s confirmée en passe lente (départ sur la butée)", self.nom, sens)
+            if self._cote == 0:
+                self._cote = 1
+                self._passe_rapide()
+            else:
+                self._fin_mesure(maintenant)
+        elif self._phase == "centrage":
+            self._fin_initialisation(maintenant)
+
+    def _fin_initialisation(self, maintenant: float) -> None:
+        self._terminer(maintenant, None,
+                       f"initialisé — plage {self.degres(self.plage)} ({self.plage} pas), "
+                       f"mandrin centré à {self.degres(self.position)}")
+
+    def _passe_rapide(self) -> None:
+        sens = self._cotes[self._cote]
+        self._phase = "rapide"
+        if self._butees[sens].stable:
+            log.info("%s : déjà sur la butée %s", self.nom, sens)
+            self.detection_rapide[sens] = None
+            self._recul(sens)
+            return
+        self._demarrer(sens, _SUR_BUTEE, cfg.BUDGET_RECHERCHE_RAPIDE_PAS[self.nom],
+                       periodes_rampe(cfg.VITESSE_RECHERCHE_RAPIDE_SPS),
+                       1.0 / cfg.VITESSE_RECHERCHE_RAPIDE_SPS,
+                       code_budget="D8", code_inattendu="D8")
+
+    def _recul(self, sens: str) -> None:
+        """Quitte la butée `sens`, puis recule encore de RECUL_CONFIRMATION_PAS.
+
+        Le recul est compté depuis le RELÂCHEMENT de la butée, pas depuis le
+        départ : après un D1, le mandrin peut être jusqu'à la marge derrière sa
+        butée, et un recul fixe ne suffirait pas à la relâcher (trouvé sur banc
+        logiciel). Avant le relâchement, D4 borne le mouvement.
+        """
+        self._phase = "recul"
+        self._demarrer(cfg.sens_oppose(sens), _DEGAGEMENT,
+                       cfg.DEGAGEMENT_MAX_PAS + cfg.RECUL_CONFIRMATION_PAS,
+                       periodes_rampe(cfg.VITESSE_RECENTRAGE_SPS), 1.0 / cfg.VITESSE_RECENTRAGE_SPS,
+                       code_budget="D4", code_inattendu="D8")
+
+    def _fin_mesure(self, maintenant: float) -> None:
+        anti, hor = self.repere_lent[cfg.SENS_ANTIHORAIRE], self.repere_lent[cfg.SENS_HORAIRE]
+        plage = hor - anti
+        nominale = cfg.PLAGE_NOMINALE_PAS[self.nom]
+        log.info("%s : plage mesurée %d pas = %.1f° (nominale %.1f°)",
+                 self.nom, plage, plage / cfg.PAS_PAR_DEGRE, cfg.PLAGE_NOMINALE_DEG[self.nom])
+        if abs(plage - nominale) > cfg.PLAGE_TOLERANCE_PAS:
+            raise Defaut("D9", f"{self.nom} : plage mesurée {plage / cfg.PAS_PAR_DEGRE:.1f}° au lieu de "
+                               f"{cfg.PLAGE_NOMINALE_DEG[self.nom]:.1f}° ± {cfg.PLAGE_TOLERANCE_DEG:.1f}°")
+        self._zero = anti
+        self.plage = plage
+        self._phase = "centrage"
+        if not self._deplacer_vers(plage // 2):
+            self._fin_initialisation(maintenant)
+
+    # ── Mouvement : démarrage, surveillance, fin ──────────────────────────
+
+    def _demarrer(self, sens: str, mode: str, budget: int, periodes: tuple, periode_suite: float,
+                  bouton: str | None = None, code_budget: str = "D1", code_inattendu: str = "D5") -> None:
+        oppose = cfg.sens_oppose(sens)
+        self._mvt = {
+            "sens": sens, "mode": mode, "bouton": bouton, "budget": budget,
+            "origine": self._pos,
+            # Butée qu'on quitte : surveillée pour D4 tant qu'elle ne s'est pas relâchée.
+            "depart": oppose if (self._butees[oppose].stable or self._butees[oppose].brut) else None,
+            "arret_a": None, "raison": None, "detection": None, "relache_a": None,
+            "code_budget": code_budget, "code_inattendu": code_inattendu,
+        }
+        self._repos_ref = None
+        self.axe.lancer_vers(sens, budget, periodes, periode_suite)
+
+    def _avancer_mouvement(self, maintenant: float) -> dict | None:
+        """Surveille le mouvement en cours. Renvoie le mouvement terminé (dict), ou None."""
+        m = self._mvt
+        sens, oppose = m["sens"], cfg.sens_oppose(m["sens"])
+        cible, autre = self._butees[sens], self._butees[oppose]
+        if self.axe.erreur is not None:
+            raise Defaut(m["code_budget"], f"{self.nom} : génération d'impulsions interrompue ({self.axe.erreur})")
+
+        if m["depart"] is not None and not autre.stable and not autre.brut:
+            m["depart"] = None                  # la butée de départ s'est relâchée (anti-rebond compris)
+        if m["depart"] is None and m["relache_a"] is None:
+            m["relache_a"] = self.axe.pas
+        if m["depart"] is not None and self.axe.pas >= cfg.DEGAGEMENT_MAX_PAS and autre.stable:
+            raise Defaut("D4", f"{self.nom} : butée {oppose} toujours active après {self.axe.pas} pas")
+        if m["depart"] is None and autre.consecutifs >= cfg.CAPTEUR_LECTURES_ARRET:
+            self.axe.demander_arret()
+            raise Defaut(m["code_inattendu"], f"{self.nom} : butée {oppose} vue en tournant vers {sens} "
+                                              "(sens de rotation ou attribution des butées à vérifier)")
+
+        if m["arret_a"] is None:
+            if m["mode"] in (_SUR_BUTEE, _AU_RELACHEMENT) and cible.consecutifs >= cfg.CAPTEUR_LECTURES_ARRET:
+                self.axe.demander_arret()
+                m["arret_a"], m["raison"] = maintenant, _SUR_BUTEE
+                m["detection"] = self._position_courante()
+            elif m["mode"] in (_SUR_COMPTE, _DEGAGEMENT) and cible.consecutifs >= cfg.CAPTEUR_LECTURES_ARRET:
+                self.axe.demander_arret()
+                raise Defaut(m["code_inattendu"], f"{self.nom} : butée {sens} vue pendant un "
+                                                  "déplacement vers une position")
+            elif m["mode"] == _AU_RELACHEMENT and not self._relachement_ok(m["bouton"]):
+                self.axe.demander_arret()
+                m["arret_a"], m["raison"] = maintenant, _AU_RELACHEMENT
+            elif (m["mode"] == _DEGAGEMENT and m["relache_a"] is not None
+                  and self.axe.pas >= m["relache_a"] + cfg.RECUL_CONFIRMATION_PAS):
+                self.axe.demander_arret()
+                m["arret_a"], m["raison"] = maintenant, _SUR_COMPTE
+            elif not self.axe.en_marche:
+                if m["mode"] == _SUR_COMPTE and self.axe.pas >= m["budget"]:
+                    m["arret_a"], m["raison"] = maintenant, _SUR_COMPTE
+                else:
+                    # Le thread s'est arrêté seul : budget épuisé, la butée n'a pas été vue.
+                    raise Defaut(m["code_budget"], f"{self.nom} : butée {sens} non vue après "
+                                                   f"{self.axe.pas} pas ({self.degres(self.axe.pas)})")
+            if m["arret_a"] is None:
+                return None
+
+        if self.axe.en_marche:
+            if maintenant - m["arret_a"] > cfg.ARRET_THREAD_MAX_S:
+                raise Defaut(m["code_budget"], f"{self.nom} : le thread d'impulsions ne s'arrête pas")
+            return None
+        if m["raison"] == _SUR_BUTEE and not cible.stable:
+            # Confirmation de l'arrivée par le signal stable.
+            if maintenant - m["arret_a"] > cfg.CONFIRMATION_CAPTEUR_MAX_S:
+                raise Defaut("D5", f"{self.nom} : butée {sens} vue puis non confirmée")
+            return None
+        self._pos = self._position_courante()
+        self._mvt = None
+        return m
+
+    def _relachement_ok(self, bouton: str) -> bool:
+        """True tant que la rotation au maintien doit continuer (lecture BRUTE)."""
+        if not self._entrees.tenu(bouton):
+            return False
+        action, _, _ = bouton.rpartition(f"_{self.nom}")
+        autre = ROTATION_MOINS if action == ROTATION_PLUS else ROTATION_PLUS
+        return not self._entrees.tenu(f"{autre}_{self.nom}")
+
+    # ── Surveillance permanente des butées (D2, D5) ───────────────────────
+
+    def _surveiller_butees(self, maintenant: float) -> None:
+        horaire, anti = self._butees[cfg.SENS_HORAIRE], self._butees[cfg.SENS_ANTIHORAIRE]
+        if horaire.stable and anti.stable:
+            self.axe.demander_arret()
+            raise Defaut("D2", f"{self.nom} : butées horaire ET antihoraire actives")
+
+        if self.etat not in _ETATS_AU_REPOS or self._mvt is not None:
+            self._repos_ref = None
+            self._repos_ecart_depuis = None
+            return
+        etat_butees = (horaire.stable, anti.stable)
+        if self._repos_ref is None:
+            self._repos_ref = etat_butees
+        if etat_butees == self._repos_ref:
+            self._repos_ecart_depuis = None
+        elif self._repos_ecart_depuis is None:
+            self._repos_ecart_depuis = maintenant
+        elif maintenant - self._repos_ecart_depuis >= cfg.TOLERANCE_PERTE_CAPTEUR_S:
+            raise Defaut("D5", f"{self.nom} : une butée a changé d'état moteur arrêté "
+                               f"(horaire {self._repos_ref[0]} → {horaire.stable}, "
+                               f"antihoraire {self._repos_ref[1]} → {anti.stable})")

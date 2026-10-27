@@ -130,8 +130,10 @@ Sur ACQUITTEMENT, depuis ATTENTE_ACQUITTEMENT ou DEFAUT. Les deux postes s'initi
    - **passe rapide** à `VITESSE_RECHERCHE_RAPIDE`, rampe en S au démarrage, arrêt sur la
      butée : on la trouve grossièrement. Déjà sur cette butée : passe sautée.
      Budget : plage nominale + marge → sinon **D8** ;
-   - **recul** de `RECUL_CONFIRMATION_DEG` (mouvement vers une position, § 8.3) ; la butée
-     doit se relâcher → sinon **D4** ;
+   - **recul** : le moteur quitte la butée, puis recule encore de `RECUL_CONFIRMATION_DEG`
+     **compté depuis le relâchement** du galet. Butée toujours active après
+     `DEGAGEMENT_MAX_DEG` → **D4**. (Trouvé sur banc logiciel : après un D1, le mandrin peut
+     être jusqu'à la marge derrière sa butée, un recul fixe de 5° ne la relâchait pas.) ;
    - **passe lente** de confirmation à `VITESSE_RECHERCHE_LENTE`, sans rampe, arrêt sur la
      butée. Budget : recul + `TOLERANCE_CONFIRMATION_DEG` → sinon **D8**.
      **C'est cet arrêt lent qui fixe la position 0** (ou `plage`).
@@ -274,8 +276,12 @@ plus sûre, on remesure les butées.
 | **D5** | à l'arrêt, une butée apparaît ou disparaît plus de `TOLERANCE_PERTE_CAPTEUR_S` ; ou butée vue pendant un recentrage | vibration, galet desserré, connecteur, ou position fausse |
 | **D6** | `OSError` I2C après `I2C_RETRIES` tentatives — **les deux postes** | bus perturbé, nappe, MCP planté |
 | **D7** | IODIR, GPPU ou latch relu ≠ attendu deux fois de suite — **les deux postes** | un MCP a perdu sa configuration (parasites) |
-| **D8** | initialisation : butée non trouvée dans le budget | comme D1, au démarrage |
+| **D8** | initialisation : butée non trouvée dans le budget, ou butée **opposée** atteinte | comme D1, au démarrage ; ou sens de rotation / attribution des butées inversés |
 | **D9** | initialisation : plage mesurée hors `PLAGE_NOMINALE_DEG ± PLAGE_TOLERANCE_DEG` | butée déplacée, capteurs inversés, pas perdus pendant la mesure |
+
+Toute butée qui s'active alors qu'on ne tourne pas vers elle arrête le moteur : D5 en
+marche, D8 à l'initialisation. Ce n'est pas un défaut « sens inversé » (refusé) : c'est
+l'arrêt sur butée, appliqué aux deux butées.
 
 D3 de la V2 (« cible déjà active au départ ») disparaît : une rotation vers une butée déjà
 atteinte est un **refus** (I4), pas un défaut.

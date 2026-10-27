@@ -1,246 +1,133 @@
 # -*- coding: utf-8 -*-
 """
-test_7_rodage.py — Allers-retours des DEUX axes entre leurs fins de course, en synchrone.
+test_7_rodage.py — Allers-retours des DEUX mandrins, butée à butée, en même temps.
 
 ⚠ CE TEST FAIT TOURNER LES DEUX MOTEURS EN MÊME TEMPS. Arrêt d'urgence à portée
-   de main. test_5_moteur.py validé sur les deux axes d'abord.
+   de main, mandrins vides. test_5 et test_6 validés sur les deux postes d'abord.
 
-⚠ Ce test n'applique PAS la règle maître / esclave du programme : les deux axes
-   partent ensemble. À faire SANS bois, et seulement si les deux axes peuvent se
-   croiser librement à vide.
+    python3 tests/test_7_rodage.py
 
-    python3 tests/test_7_rodage.py            au profil (accélération, palier, décélération)
-    python3 tests/test_7_rodage.py --lent     tout à vitesse d'approche
+Déroulé, avec le VRAI code des postes (libs/poste.py) :
+  1. initialisation réelle des deux postes, en même temps (deux butées en deux
+     passes, puis centrage) ;
+  2. après ton accord, les deux mandrins partent ENSEMBLE vers leur butée
+     HORAIRE à la vitesse de croisière (rampe de démarrage comprise) ; chacun
+     s'arrête sur sa butée ; le script attend que LES DEUX soient arrivés ;
+  3. puis vers ANTIHORAIRE ; et ainsi de suite.
 
-Déroulé :
-  1. AUTO-TEST DE DÉPART — pour chaque axe, l'un après l'autre : lecture des
-     fins de course (en coupe ? en ligaturage ? entre les deux ?), puis mise en
-     position COUPE à vitesse lente. Le sens de rotation est vérifié en route :
-     si l'axe arrive sur LIGATURAGE alors qu'il vise COUPE, ou s'il ne quitte
-     pas LIGATURAGE, tout s'arrête avec la correction à faire dans config.py.
-  2. Après ton accord, les deux axes partent ENSEMBLE vers LIGATURAGE ; chacun
-     s'arrête sur sa propre fin de course ; le script attend que LES DEUX
-     soient arrivés (les courses sont différentes : l'un attend l'autre).
-  3. Pause, puis les deux repartent ensemble vers COUPE ; et ainsi de suite.
+À chaque arrivée, la position comptée en pas est comparée à la butée : c'est
+l'« écart de recalage ». Il doit rester de quelques pas. S'il grandit, le
+moteur perd des pas (décrochage, rampe trop courte, courant trop faible).
 
-Chaque trajet est borné en pas, par axe.
+UN DÉFAUT N'ARRÊTE PAS LE RODAGE. Le script note le raté, réinitialise le poste
+concerné, puis continue. Il ne s'arrête que si RATES_DE_SUITE_MAX trajets ratés
+se suivent. Ctrl+C arrête tout.
 
-UN RATÉ N'ARRÊTE PAS LE RODAGE. Si un axe n'atteint pas sa cible (décrochage)
-ou ne quitte pas son galet de départ, le script note le raté, remet les deux
-axes en position COUPE à vitesse lente, puis continue. Il ne s'arrête que si :
-  - RATES_DE_SUITE_MAX trajets ratés se suivent (la machine a un vrai problème) ;
-  - la remise en COUPE échoue ;
-  - les deux fins de course d'un axe sont actives ensemble.
-Ctrl+C arrête tout.
+À la fin (ou sur Ctrl+C) : récapitulatif par poste et par sens, à m'envoyer.
+Il est aussi ENREGISTRÉ dans indus_V3/logs/rodage_<date>_<heure>.txt, et
+réécrit tous les 20 trajets et à chaque raté.
 
-À la fin (ou sur Ctrl+C) : récapitulatif par axe et par sens, à m'envoyer.
-Il est aussi ENREGISTRÉ dans indus_V3/logs/rodage_<date>_<heure>.txt, et ce
-fichier est réécrit tous les 20 trajets et à chaque raté : rien n'est perdu si
-la fenêtre se ferme ou si l'arrêt d'urgence tombe.
-
-Colonne « retard » : pire retard d'une impulsion pendant le trajet, en ms. Un
-retard de plusieurs ms juste avant un raté désignerait la génération des
-impulsions (Python, système) plutôt que la mécanique.
+Colonne « retard » : pire retard d'une impulsion pendant le trajet, en ms. Les
+deux moteurs tournant ensemble, c'est l'indicateur à surveiller : un retard de
+plusieurs ms juste avant un raté désignerait la génération des impulsions
+(Python, système) plutôt que la mécanique.
 """
 
-import sys
 import time
 from pathlib import Path
 
 import _commun
-from _commun import cfg, confirmer, question, titre, voyant
-from libs.entrees import Entrees
-from libs.moteur import Axe, PortsDrivers
+from _commun import cfg, confirmer, question, titre
+from libs.poste import PRET, Defaut
 
 PAUSE_ENTRE_TRAJETS_S = 0.5
-RATES_DE_SUITE_MAX = 3       # au-delà, le rodage s'arrête
-ENREGISTREMENT_TOUS_LES = 20 # trajets entre deux réécritures du fichier de récapitulatif
-FICHIER_RECAP = (Path(cfg.CHEMIN_JOURNAL).parent
-                 / f"rodage_{time.strftime('%Y%m%d_%H%M%S')}.txt")
+RATES_DE_SUITE_MAX = 3
+ENREGISTREMENT_TOUS_LES = 20
+FICHIER_RECAP = Path(cfg.CHEMIN_JOURNAL).parent / f"rodage_{time.strftime('%Y%m%d_%H%M%S')}.txt"
 CYCLES_PAR_DEFAUT = 10
+DELAI_TRAJET_S = 60.0
 
-COUPE, LIGATURAGE = cfg.POSITION_COUPE, cfg.POSITION_LIGATURAGE
-LENT = "--lent" in sys.argv
-
-titre("TEST 7 — RODAGE : ALLERS-RETOURS SYNCHRONES DES DEUX AXES")
-print("  ⚠ Les deux moteurs tournent en même temps, sans la règle maître / esclave.")
-print("    Sans bois, axes libres de se croiser.")
+titre("TEST 7 — RODAGE : ALLERS-RETOURS DES DEUX MANDRINS ENSEMBLE")
+print("  ⚠ Les deux moteurs tournent en même temps. Mandrins vides.")
 reponse = question(f"Nombre d'allers-retours [{CYCLES_PAR_DEFAUT}] ?")
 cycles = int(reponse) if reponse.isdigit() and int(reponse) > 0 else CYCLES_PAR_DEFAUT
 
 materiel = _commun.ouvrir(avec_gpio=True)
-drivers = PortsDrivers(materiel.drivers)
-entrees = Entrees(materiel.relais, materiel.entrees)
-axes = {
-    cfg.POSTE_MERE: Axe(cfg.POSTE_MERE, materiel.puce, cfg.PUL_MERE, cfg.DIR_MERE, cfg.ENA_MERE, drivers),
-    cfg.POSTE_FILLE: Axe(cfg.POSTE_FILLE, materiel.puce, cfg.PUL_FILLE, cfg.DIR_FILLE, cfg.ENA_FILLE, drivers),
-}
-mesures = {}       # (poste, cible) → [(pas au galet, pas à l'arrêt, durée jusqu'au galet)]
-rates = {}         # (poste, cible) → [(numéro du trajet, raison)]
+entrees, postes, buzzer = _commun.construire_postes(materiel)
+mesures = {}       # (poste, sens) → [(écart de recalage en pas, durée, retard max ms)]
+rates = {}         # (poste, sens) → [(numéro du trajet, raison)]
+plages = {}        # poste → plage mesurée à la dernière initialisation (pas)
 
 
-class Echec(Exception):
-    pass
-
-
-def direction(poste: str, cible: str) -> int:
-    return (cfg.DIR_VERS_LIGATURAGE if cible == LIGATURAGE else cfg.DIR_VERS_COUPE)[poste]
-
-
-def lire_stable() -> None:
-    """Remplit l'anti-rebond : après cela, les .stable sont fiables."""
-    for _ in range(12):
-        entrees.rafraichir(time.monotonic())
-        time.sleep(cfg.PERIODE_BOUCLE_S)
-
-
-def arreter_tout() -> None:
-    for axe in axes.values():
-        axe.demander_arret()
-    for axe in axes.values():
-        axe.attendre_fin(cfg.ARRET_THREAD_MAX_S)
-        axe.relacher()
-
-
-def mise_en_coupe(poste: str) -> None:
-    """Auto-test de départ d'un axe : où est-il, puis mise en COUPE lente en
-    vérifiant le sens de rotation."""
-    axe = axes[poste]
-    coupe, ligaturage = entrees.capteur(poste, COUPE), entrees.capteur(poste, LIGATURAGE)
-    lire_stable()
-    print(f"    {poste:5s} : COUPE {voyant(coupe.stable)}  LIGATURAGE {voyant(ligaturage.stable)}  → ",
-          end="", flush=True)
-    if coupe.stable and ligaturage.stable:
-        raise Echec(f"{poste} : les deux fins de course actives ensemble (voir test_3)")
-    if coupe.stable:
-        print("déjà en position COUPE")
-        return
-    parti_de_ligaturage = ligaturage.stable
-    print("en position LIGATURAGE, retour vers COUPE…" if parti_de_ligaturage
-          else "entre les deux, recherche de COUPE…", end="", flush=True)
-
-    conseil = (f"\n      → inverser DIR_VERS_LIGATURAGE[{poste}] dans config.py "
-               f"(actuellement {cfg.DIR_VERS_LIGATURAGE[poste]}), ou vérifier le câblage DIR")
-    axe.preparer(direction(poste, COUPE))
-    axe.lancer(cfg.MOTEUR_BUDGET_PAS[poste] + cfg.MOTEUR_MARGE_PAS, lent=True)
-    arrive = False
-    try:
-        while axe.en_marche:
-            entrees.rafraichir(time.monotonic())
-            if coupe.stable and ligaturage.stable:
-                raise Echec(f"{poste} : les deux fins de course actives ensemble")
-            if not arrive and coupe.consecutifs >= cfg.CAPTEUR_LECTURES_ARRET:
-                arrive = True
-                axe.demander_arret_apres(cfg.MOTEUR_SURCOURSE_PAS)
-            elif not arrive and not parti_de_ligaturage \
-                    and ligaturage.consecutifs >= cfg.CAPTEUR_LECTURES_ARRET:
-                raise Echec(f"{poste} : SENS INVERSÉ — l'axe est arrivé sur LIGATURAGE en visant COUPE"
-                            + conseil)
-            elif not arrive and parti_de_ligaturage and ligaturage.stable \
-                    and axe.pas >= cfg.MOTEUR_DEGAGEMENT_MAX_PAS:
-                raise Echec(f"{poste} : toujours sur LIGATURAGE après {axe.pas} pas — le moteur ne tourne "
-                            "pas (puissance, LED du driver), ou il tourne dans le mauvais sens" + conseil)
-            time.sleep(cfg.PERIODE_BOUCLE_S)
-    finally:
-        axe.demander_arret()
-        axe.attendre_fin(cfg.ARRET_THREAD_MAX_S)
-        axe.relacher()
-    if axe.erreur is not None:
-        raise Echec(f"{poste} : génération d'impulsions interrompue ({axe.erreur})")
-    if not arrive:
-        raise Echec(f"{poste} : position COUPE non trouvée en {axe.pas} pas — sens inversé, moteur "
-                    "bloqué, ou fin de course COUPE hors service" + conseil)
-    print(f" ✓ en COUPE après {axe.pas} pas, sens correct")
-
-
-def trajet_synchrone(cible: str) -> tuple:
-    """Les deux axes vers `cible`, ensemble. Rend la main quand LES DEUX sont arrêtés.
-
-    Renvoie (résultats, ratés) :
-      résultats : poste → (pas au galet, pas à l'arrêt, durée jusqu'au galet), ou None si raté
-      ratés     : poste → raison
-    """
-    depart = COUPE if cible == LIGATURAGE else LIGATURAGE
-    entrees.rafraichir(time.monotonic())
-    for poste in cfg.POSTES:
-        if entrees.capteur(poste, cible).brut:
-            raise Echec(f"{poste} : fin de course {cible} déjà active avant le départ")
-
-    for poste, axe in axes.items():               # ENA et DIR des deux, puis départ groupé
-        axe.preparer(direction(poste, cible))
+def trajet(sens: str) -> dict:
+    """Les deux mandrins vers la butée `sens`, ensemble. Renvoie poste → mesure ou raison du raté."""
+    resultats = {}
+    actifs = {}
     debut = time.monotonic()
-    for poste, axe in axes.items():
-        axe.lancer(cfg.MOTEUR_BUDGET_PAS[poste], LENT)
+    for nom, poste in postes.items():
+        if poste.etat != PRET:
+            resultats[nom] = "poste non initialisé"
+        elif entrees.butee(nom, sens).stable:
+            resultats[nom] = f"déjà sur la butée {sens}"
+        else:
+            poste.lancer_rotation(sens)
+            actifs[nom] = poste
+    while actifs:
+        try:
+            _commun.tourner(entrees, actifs, lambda: any(p.etat == PRET for p in actifs.values()),
+                            DELAI_TRAJET_S, f"trajet vers {sens}", buzzer)
+        except Defaut as defaut:
+            fautif = _poste_du_defaut(defaut, actifs)
+            resultats[fautif] = f"DÉFAUT {defaut.code} : {defaut.detail}"
+            _commun.arreter_postes({fautif: actifs.pop(fautif)})
+            continue
+        except TimeoutError as erreur:
+            for nom in list(actifs):
+                resultats[nom] = str(erreur)
+            _commun.arreter_postes(actifs)
+            break
+        for nom in [n for n, p in actifs.items() if p.etat == PRET]:
+            poste = actifs.pop(nom)
+            resultats[nom] = (poste.dernier_ecart_recalage or 0, time.monotonic() - debut,
+                              poste.axe.retard_max_s * 1000)
+    return resultats
 
-    galet = {}                                     # poste → (pas, durée)
-    echecs = {}                                    # poste → raison
-    try:
-        while any(axe.en_marche for axe in axes.values()):
-            maintenant = time.monotonic()
-            entrees.rafraichir(maintenant)
-            for poste, axe in axes.items():
-                c_cible, c_depart = entrees.capteur(poste, cible), entrees.capteur(poste, depart)
-                if c_cible.stable and c_depart.stable:
-                    raise Echec(f"{poste} : les deux fins de course actives ensemble")
-                if poste in galet or poste in echecs:
-                    continue
-                if c_cible.consecutifs >= cfg.CAPTEUR_LECTURES_ARRET:
-                    galet[poste] = (axe.pas, maintenant - debut)
-                    axe.demander_arret_apres(cfg.MOTEUR_SURCOURSE_PAS)
-                elif axe.pas >= cfg.MOTEUR_DEGAGEMENT_MAX_PAS and c_depart.stable:
-                    echecs[poste] = (f"n'a pas quitté la fin de course {depart} après {axe.pas} pas, "
-                                     f"retard max {axe.retard_max_s * 1000:.1f} ms")
-                    axe.demander_arret()           # cet axe seulement : l'autre finit son trajet
-            time.sleep(cfg.PERIODE_BOUCLE_S)
-    finally:
-        arreter_tout()
 
-    for poste, axe in axes.items():
-        if axe.erreur is not None:
-            raise Echec(f"{poste} : génération d'impulsions interrompue ({axe.erreur})")
-        if poste not in galet and poste not in echecs:
-            echecs[poste] = (f"fin de course {cible} non atteinte en {axe.pas} pas "
-                             f"(budget {cfg.MOTEUR_BUDGET_PAS[poste]}), "
-                             f"retard max {axe.retard_max_s * 1000:.1f} ms")
-    resultats = {poste: ((galet[poste][0], axes[poste].pas, galet[poste][1],
-                          axes[poste].retard_max_s * 1000) if poste in galet else None)
-                 for poste in cfg.POSTES}
-    return resultats, echecs
+def _poste_du_defaut(defaut: Defaut, actifs: dict) -> str:
+    """Le message d'un défaut de poste commence par le nom du poste."""
+    for nom in actifs:
+        if defaut.detail.startswith(nom):
+            return nom
+    return next(iter(actifs))
 
 
 def recapitulatif(faits: int, afficher: bool = True) -> None:
-    """Compose le récapitulatif, l'enregistre dans FICHIER_RECAP, et l'affiche si demandé."""
     lignes = ["┌─ RÉCAPITULATIF À M'ENVOYER " + "─" * 58]
-    lignes.append(f"│ {time.strftime('%Y-%m-%d %H:%M:%S')} — {faits} trajet(s) synchrone(s), mode "
-                  f"{'LENT' if LENT else 'PROFIL'} — {cfg.DRIVER_PAS_PAR_TOUR} pas/tr, rampes "
-                  f"{'en S' if cfg.MOTEUR_RAMPES_EN_S else 'droites'}, approche "
-                  f"{cfg.MOTEUR_VITESSE_APPROCHE_SPS:.0f} pas/s")
-    for poste in cfg.POSTES:
-        lignes.append(f"│ {poste:5s} : course config {cfg.MOTEUR_COURSE_PAS[poste]} pas, max "
-                      f"{cfg.MOTEUR_VITESSE_MAX_SPS[poste]:.0f} pas/s (pointe atteinte "
-                      f"{cfg.MOTEUR_VITESSE_POINTE_SPS[poste]:.0f}), accél. "
-                      f"{cfg.MOTEUR_ACCEL_SPS2[poste]:.0f}, décél. {cfg.MOTEUR_DECEL_SPS2[poste]:.0f} pas/s²")
+    lignes.append(f"│ {time.strftime('%Y-%m-%d %H:%M:%S')} — {faits} trajet(s), {cfg.DRIVER_PAS_PAR_TOUR} pas/tr, "
+                  f"croisière {cfg.VITESSE_CROISIERE_DEG_S:.1f}°/s, démarrage {cfg.VITESSE_DEMARRAGE_DEG_S:.1f}°/s, "
+                  f"rampe {cfg.DUREE_RAMPE_ROTATION_S:.1f} s {'en S' if cfg.MOTEUR_RAMPES_EN_S else 'droite'}")
+    for nom, poste in postes.items():
+        lignes.append(f"│ {nom:5s} : plage mesurée {poste.degres(plages.get(nom))} "
+                      f"(nominale {cfg.PLAGE_NOMINALE_DEG[nom]:.1f}°)")
     lignes.append("│")
-    lignes.append("│ axe    sens              réussis  ratés  pas au galet (min / moy / max)   "
-                  "durée moy.   retard max")
+    lignes.append("│ poste  sens          réussis  ratés  écart de recalage (min / moy / max)   durée moy.   retard max")
     for cle in sorted(set(mesures) | set(rates)):
-        poste, sens = cle
+        nom, sens = cle
         liste = mesures.get(cle, [])
-        nb_rates = len(rates.get(cle, []))
         if liste:
-            pas = [m[0] for m in liste]
-            durees = [m[2] for m in liste]
-            chiffres = (f"{min(pas):5d} / {sum(pas) / len(pas):7.1f} / {max(pas):5d}        "
-                        f"{sum(durees) / len(durees):5.2f} s     {max(m[3] for m in liste):6.1f} ms")
+            ecarts = [m[0] / cfg.PAS_PAR_DEGRE for m in liste]
+            durees = [m[1] for m in liste]
+            chiffres = (f"{min(ecarts):+6.2f}° / {sum(ecarts) / len(ecarts):+6.2f}° / {max(ecarts):+6.2f}°"
+                        f"      {sum(durees) / len(durees):5.1f} s     {max(m[2] for m in liste):5.1f} ms")
         else:
             chiffres = "    —"
-        lignes.append(f"│ {poste:5s}  vers {sens:11s}  {len(liste):^7d}  {nb_rates:^5d}  {chiffres}")
-    total_rates = sum(len(liste) for liste in rates.values())
+        lignes.append(f"│ {nom:5s}  {sens:12s}  {len(liste):^7d}  {len(rates.get(cle, [])):^5d}  {chiffres}")
+    total = sum(len(liste) for liste in rates.values())
     lignes.append("│")
-    lignes.append(f"│ ratés : {total_rates}")
-    for (poste, sens), liste in sorted(rates.items()):
+    lignes.append(f"│ ratés : {total}")
+    for (nom, sens), liste in sorted(rates.items()):
         for numero, raison in liste:
-            lignes.append(f"│   trajet {numero:4d} — {poste} vers {sens} : {raison}")
+            lignes.append(f"│   trajet {numero:4d} — {nom} vers {sens} : {raison}")
     lignes.append("└" + "─" * 86)
     try:
         FICHIER_RECAP.parent.mkdir(parents=True, exist_ok=True)
@@ -256,65 +143,62 @@ def recapitulatif(faits: int, afficher: bool = True) -> None:
 
 faits = 0
 try:
-    # ── 1. Auto-test de départ : état, mise en COUPE, sens de rotation ─────
-    esclave = cfg.POSTE_FILLE if cfg.MOTEUR_MAITRE == cfg.POSTE_MERE else cfg.POSTE_MERE
-    print("\n  Auto-test de départ (lent, un axe après l'autre, l'esclave d'abord) :")
-    for poste in (esclave, cfg.MOTEUR_MAITRE):
-        mise_en_coupe(poste)
-    print("  Les deux axes sont en position COUPE.")
+    print("\n  Initialisation des deux postes (en même temps)…")
+    duree = _commun.initialiser(entrees, postes, buzzer)
+    for nom, poste in postes.items():
+        plages[nom] = poste.plage
+        print(f"    {nom:5s} : plage {poste.degres(poste.plage)}, centré à {poste.degres(poste.position)}")
+    print(f"  Initialisés en {duree:.1f} s.")
 
-    if not confirmer(f"Lancer {cycles} allers-retours synchrones ({'LENT' if LENT else 'PROFIL'}) ?"):
+    if not confirmer(f"Lancer {cycles} allers-retours des deux mandrins ensemble ?"):
         raise SystemExit("  Non lancé.")
 
-    # ── 2. Allers-retours synchrones ───────────────────────────────────────
     print(f"  Récapitulatif enregistré au fil de l'eau dans : {FICHIER_RECAP}")
-    print("\n   n°  sens             mère : galet / arrêt / durée / retard     "
-          "fille : galet / arrêt / durée / retard")
+    print("\n   n°  vers          mère : écart / durée / retard       fille : écart / durée / retard")
 
-    def colonne(valeurs) -> str:
-        if valeurs is None:
-            return "            R A T É             "
-        return f"{valeurs[0]:5d} / {valeurs[1]:5d} / {valeurs[2]:5.2f} s / {valeurs[3]:4.1f} ms"
+    def colonne(valeur) -> str:
+        if not isinstance(valeur, tuple):
+            return "         R A T É          "
+        return f"{valeur[0] / cfg.PAS_PAR_DEGRE:+6.2f}° / {valeur[1]:5.1f} s / {valeur[2]:4.1f} ms"
 
-    cible = LIGATURAGE
+    sens = cfg.SENS_HORAIRE
     rates_de_suite = 0
     for numero in range(1, 2 * cycles + 1):
-        resultat, echecs = trajet_synchrone(cible)
+        resultats = trajet(sens)
         faits += 1
-        for poste, valeurs in resultat.items():
-            if valeurs is not None:
-                mesures.setdefault((poste, cible), []).append(valeurs)
-        print(f"  {numero:4d}  vers {cible:11s}  {colonne(resultat[cfg.POSTE_MERE])}"
-              f"          {colonne(resultat[cfg.POSTE_FILLE])}")
+        echecs = {n: r for n, r in resultats.items() if not isinstance(r, tuple)}
+        for nom, valeur in resultats.items():
+            if isinstance(valeur, tuple):
+                mesures.setdefault((nom, sens), []).append(valeur)
+        print(f"  {numero:4d}  {sens:12s}  {colonne(resultats.get(cfg.POSTE_MERE))}"
+              f"     {colonne(resultats.get(cfg.POSTE_FILLE))}")
         if echecs:
-            for poste, raison in echecs.items():
-                rates.setdefault((poste, cible), []).append((numero, raison))
-                print(f"        ✗ raté — {poste} : {raison}")
+            for nom, raison in echecs.items():
+                rates.setdefault((nom, sens), []).append((numero, raison))
+                print(f"        ✗ raté — {nom} : {raison}")
             rates_de_suite += 1
             recapitulatif(faits, afficher=False)
             if rates_de_suite >= RATES_DE_SUITE_MAX:
-                raise Echec(f"{RATES_DE_SUITE_MAX} trajets ratés de suite — rodage arrêté")
-            print("        remise en position COUPE, puis reprise :")
-            for poste in (esclave, cfg.MOTEUR_MAITRE):
-                mise_en_coupe(poste)
-            cible = LIGATURAGE
+                raise SystemExit(f"  ✗ ARRÊT : {RATES_DE_SUITE_MAX} trajets ratés de suite — rodage arrêté")
+            print("        réinitialisation du ou des postes en raté, puis reprise :")
+            _commun.initialiser(entrees, {n: postes[n] for n in echecs}, buzzer)
+            plages.update({n: postes[n].plage for n in echecs})
         else:
             rates_de_suite = 0
-            cible = COUPE if cible == LIGATURAGE else LIGATURAGE
+        sens = cfg.sens_oppose(sens)
         if numero % ENREGISTREMENT_TOUS_LES == 0:
             recapitulatif(faits, afficher=False)
         time.sleep(PAUSE_ENTRE_TRAJETS_S)
-    total_rates = sum(len(liste) for liste in rates.values())
-    print(f"\n  Rodage terminé : {faits} trajets, {total_rates} raté(s).")
-except Echec as echec:
-    print(f"\n  ✗ ARRÊT : {echec}")
+    total = sum(len(liste) for liste in rates.values())
+    print(f"\n  Rodage terminé : {faits} trajets, {total} raté(s).")
+except Defaut as defaut:
+    print(f"\n  ✗ DÉFAUT {defaut.code} : {defaut.detail}")
+except TimeoutError as erreur:
+    print(f"\n  ✗ {erreur}")
 except KeyboardInterrupt:
     print("\n  Interrompu.")
 finally:
-    for axe in axes.values():
-        axe.demander_arret()
-    for axe in axes.values():
-        axe.attendre_fin(cfg.ARRET_THREAD_MAX_S)
+    _commun.arreter_postes(postes)
     materiel.fermer()
     if mesures or rates:
         recapitulatif(faits)

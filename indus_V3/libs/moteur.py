@@ -1,27 +1,30 @@
 # -*- coding: utf-8 -*-
 """
-moteur.py — Un axe pas-à-pas : ENA / DIR via le MCP 0x25, impulsions PUL dans un thread.
+moteur.py — Un moteur de rotation : ENA / DIR via le MCP 0x25, impulsions PUL dans un thread.
 
-Origine : Clean-and-Protech V4 libs/moteur.py (séquence ENA → DIR → pause →
-impulsions, rampe linéaire) et libs/io_board.py (images des ports ENA / DIR).
-Changements :
-  - la boucle d'impulsions tourne dans un THREAD et teste un drapeau d'arrêt à
-    chaque pas : la boucle principale continue de lire les capteurs pendant le
-    mouvement (LOGIQUE.md § 2.4) ;
-  - profil à 4 phases : accélération, palier, décélération, approche lente
-    sans longueur fixe (LOGIQUE.md § 8) ;
-  - budget de pas dur : le thread s'arrête de lui-même au dernier pas autorisé ;
-  - retrait de la résolution par nom métier, des 8 drivers et du homing V4.
+Origine : indus V2 libs/moteur.py (thread d'impulsions, drapeau d'arrêt,
+budget de pas dur, rampes en S), lui-même repris de Clean-and-Protech V4
+libs/moteur.py et libs/io_board.py.
+Changements V3 (LOGIQUE.md § 2.1 et § 8) :
+  - trois profils au lieu d'un : OUVERT (rampe puis croisière jusqu'à l'ordre
+    d'arrêt : rotation au maintien, passe rapide), LENT (vitesse constante, sans
+    rampe : passe lente de confirmation), FERMÉ (rampe, croisière, rampe, arrêt
+    sur un nombre de pas : centrage, recul) ;
+  - rampes définies par une DURÉE (DUREE_RAMPE_ROTATION_S), pas par une
+    accélération ;
+  - la pause DIR → premier pas est faite PAR LE THREAD : la boucle principale
+    n'attend plus jamais (les deux moteurs tournent en même temps) ;
+  - plus d'approche lente, plus de surcourse, plus d'extension de budget.
 
 Partage entre threads : le thread d'impulsions ne touche QUE sa broche PUL. Il
-ne fait jamais d'I2C. DIR et ENA sont écrits par la boucle principale, avant le
-départ et après l'arrêt. Seuls le drapeau d'arrêt, la consigne de surcourse et
-le compteur de pas sont partagés, chacun écrit par un seul côté : aucun verrou
-n'est nécessaire.
+ne fait jamais d'I2C. DIR et ENA sont écrits par la boucle principale. Seuls le
+drapeau d'arrêt et le compteur de pas sont partagés, chacun écrit par un seul
+côté : aucun verrou n'est nécessaire.
 """
 
 from __future__ import annotations
 
+import functools
 import logging
 import math
 import threading
@@ -35,54 +38,78 @@ from libs.materiel import ENA_TOUS_LIBRES, PORT_A, PORT_B, Mcp23017
 log = logging.getLogger("vitis")
 
 
-def _vitesse_profil(poste: str, pas: int) -> float:
-    """Consigne de vitesse (pas/s) du profil normal de l'axe `poste`, au pas numéro `pas`."""
-    v_app = cfg.MOTEUR_VITESSE_APPROCHE_SPS
-    v_max = cfg.MOTEUR_VITESSE_POINTE_SPS[poste]      # < VITESSE_MAX si la course est courte
-    fin_decel = cfg.MOTEUR_FIN_DECEL_PAS[poste]
-    accel_pas, decel_pas = cfg.MOTEUR_ACCEL_PAS[poste], cfg.MOTEUR_DECEL_PAS[poste]
-    if pas >= fin_decel:
-        return v_app
-    if pas < accel_pas:
-        avancement, acceleration, longueur = pas, cfg.MOTEUR_ACCEL_SPS2[poste], accel_pas
-    elif pas >= fin_decel - decel_pas:
-        avancement, acceleration, longueur = fin_decel - pas, cfg.MOTEUR_DECEL_SPS2[poste], decel_pas
-    else:
-        return v_max
+# ═══════════════════════════════════════════════════════════════════════════
+#  PROFILS DE VITESSE  (calculés une fois, le thread ne lit qu'un tableau)
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _vitesse_rampe(t: float, v_depart: float, v_cible: float) -> float:
+    """Vitesse (pas/s) à l'instant `t` d'une rampe de DUREE_RAMPE_ROTATION_S."""
+    avancement = min(t / cfg.DUREE_RAMPE_ROTATION_S, 1.0)
     if cfg.MOTEUR_RAMPES_EN_S:
-        # Demi-cosinus : pente nulle aux deux bouts de la rampe, donc pas de
-        # cassure de vitesse — c'est la cassure qui excite la mécanique.
-        v = v_app + (v_max - v_app) * (1 - math.cos(math.pi * avancement / longueur)) / 2
-    else:
-        v = math.sqrt(v_app ** 2 + 2 * acceleration * avancement)
-    return min(v, v_max)
+        # Demi-cosinus : pente nulle aux deux bouts, donc pas de cassure de
+        # vitesse — c'est la cassure qui excite la mécanique.
+        avancement = (1 - math.cos(math.pi * avancement)) / 2
+    return v_depart + (v_cible - v_depart) * avancement
 
 
-# Périodes du profil normal de chaque axe (les courses diffèrent), calculées
-# une fois : le thread ne fait qu'une lecture de tableau par pas. Au-delà du
-# tableau : vitesse d'approche.
-PERIODES_PROFIL = {poste: tuple(1.0 / _vitesse_profil(poste, i)
-                                for i in range(cfg.MOTEUR_FIN_DECEL_PAS[poste]))
-                   for poste in cfg.POSTES}
-PERIODE_APPROCHE = 1.0 / cfg.MOTEUR_VITESSE_APPROCHE_SPS
+@functools.lru_cache(maxsize=None)
+def periodes_rampe(v_cible_sps: float) -> tuple:
+    """Périodes (s) des pas d'une rampe VITESSE_DEMARRAGE → `v_cible_sps`.
 
+    La rampe est découpée dans le TEMPS : chaque pas prend la vitesse de
+    l'instant où il part. Sa longueur en pas dépend donc de la vitesse visée.
+    """
+    periodes = []
+    t = 0.0
+    while t < cfg.DUREE_RAMPE_ROTATION_S:
+        periode = 1.0 / _vitesse_rampe(t, cfg.VITESSE_DEMARRAGE_SPS, v_cible_sps)
+        periodes.append(periode)
+        t += periode
+    return tuple(periodes)
+
+
+def periodes_vers_position(nombre_pas: int, v_cible_sps: float) -> tuple:
+    """Profil FERMÉ de `nombre_pas` pas : rampe, croisière, rampe miroir.
+
+    Trajet trop court pour les deux rampes complètes : chacune est tronquée à
+    la moitié du trajet, la vitesse de pointe baisse d'autant (comme en V2).
+    """
+    montee = periodes_rampe(v_cible_sps)
+    longueur = min(len(montee), nombre_pas // 2)
+    croisiere = 1.0 / v_cible_sps
+    milieu = nombre_pas - 2 * longueur
+    return montee[:longueur] + (croisiere,) * milieu + tuple(reversed(montee[:longueur]))
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  PORTS DIR / ENA
+# ═══════════════════════════════════════════════════════════════════════════
 
 def _avec_bit(octet: int, bit: int, niveau: int) -> int:
     return (octet | (1 << bit)) if niveau else (octet & ~(1 << bit) & 0xFF)
 
 
 class PortsDrivers:
-    """Les deux ports du MCP 0x25. Chaque écriture envoie l'octet complet."""
+    """Les deux ports du MCP 0x25. Chaque écriture envoie l'octet complet,
+    et seulement s'il change : une écriture de DIR inutile coûterait une
+    transaction I2C par mouvement."""
 
     def __init__(self, mcp: Mcp23017) -> None:
         self._mcp = mcp
 
+    def _ecrire(self, port: int, valeur: int) -> None:
+        if valeur != self._mcp.image(port):
+            self._mcp.ecrire_port(port, valeur)
+
     def ecrire_ena(self, bit: int, excite: bool) -> None:
         niveau = cfg.ENA_MOTEUR_EXCITE if excite else cfg.ENA_MOTEUR_LIBRE
-        self._mcp.ecrire_port(PORT_B, _avec_bit(self._mcp.image(PORT_B), bit, niveau))
+        self._ecrire(PORT_B, _avec_bit(self._mcp.image(PORT_B), bit, niveau))
 
     def ecrire_dir(self, bit: int, niveau: int) -> None:
-        self._mcp.ecrire_port(PORT_A, _avec_bit(self._mcp.image(PORT_A), bit, niveau))
+        self._ecrire(PORT_A, _avec_bit(self._mcp.image(PORT_A), bit, niveau))
+
+    def est_libre(self, bit: int) -> bool:
+        return bool(self._mcp.image(PORT_B) & (1 << bit)) == bool(cfg.ENA_MOTEUR_LIBRE)
 
     def liberer_tous(self) -> None:
         self._mcp.ecrire_port(PORT_B, ENA_TOUS_LIBRES)
@@ -91,8 +118,12 @@ class PortsDrivers:
         return self._mcp.image(PORT_B) == ENA_TOUS_LIBRES
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+#  MOTEUR
+# ═══════════════════════════════════════════════════════════════════════════
+
 class Axe:
-    """Un axe : préparation (ENA, DIR) par la boucle, impulsions par un thread."""
+    """Un moteur : ENA et DIR par la boucle principale, impulsions par un thread."""
 
     def __init__(self, poste: str, puce: int, broche_pul: int, bit_dir: int, bit_ena: int,
                  ports: PortsDrivers) -> None:
@@ -104,37 +135,52 @@ class Axe:
         self._ports = ports
         self._thread: threading.Thread | None = None
         self._arret = threading.Event()
-        self._budget = 0                       # écrit par la boucle, lu par le thread
-        self._surcourse: int | None = None     # écrit par la boucle, lu par le thread
         self.pas = 0                           # écrit par le thread, lu par la boucle
         self.erreur: Exception | None = None   # écrit par le thread, lu par la boucle
         self.retard_max_s = 0.0                # écrit par le thread : pire retard d'une impulsion
 
     # ── Côté boucle principale ────────────────────────────────────────────
 
-    def preparer(self, direction: int) -> None:
-        """Excite le moteur et fixe le sens. Accès I2C : boucle principale seulement."""
+    def exciter(self) -> None:
+        """ENA à « excité » (couple de maintien). Accès I2C : boucle principale seulement."""
         self._ports.ecrire_ena(self._bit_ena, excite=True)
-        time.sleep(cfg.MOTEUR_ENA_AVANT_DIR_S)
-        self._ports.ecrire_dir(self._bit_dir, direction)
-        time.sleep(cfg.MOTEUR_DIR_AVANT_PAS_S)
 
-    def lancer(self, budget: int, lent: bool, vitesse_lente_sps: float | None = None) -> None:
-        """Démarre le thread d'impulsions. `lent` : tout le trajet à vitesse d'approche.
+    def liberer(self) -> None:
+        """ENA à « libre ». Accès I2C : boucle principale seulement."""
+        self._ports.ecrire_ena(self._bit_ena, excite=False)
 
-        `vitesse_lente_sps` remplace la vitesse d'approche pour ce mouvement
-        (scripts de test : déplacement manuel très lent)."""
+    @property
+    def libre(self) -> bool:
+        return self._ports.est_libre(self._bit_ena)
+
+    def lancer_vers(self, sens: str, budget: int, periodes: tuple, periode_suite: float) -> None:
+        """Écrit DIR puis démarre le thread d'impulsions.
+
+        `periodes` : périodes des premiers pas (rampe ou profil fermé) ;
+        `periode_suite` : période des pas suivants, jusqu'au budget ou à l'arrêt.
+        Le moteur doit déjà être excité.
+        """
         if self.en_marche:
-            raise RuntimeError(f"axe {self.poste} : thread d'impulsions déjà en marche")
+            raise RuntimeError(f"moteur {self.poste} : thread d'impulsions déjà en marche")
+        niveau = (cfg.DIR_VERS_HORAIRE if sens == cfg.SENS_HORAIRE
+                  else cfg.DIR_VERS_ANTIHORAIRE)[self.poste]
+        self._ports.ecrire_dir(self._bit_dir, niveau)
+        self._lancer(budget, periodes, periode_suite)
+
+    def lancer_niveau(self, niveau_dir: int, budget: int, periodes: tuple, periode_suite: float) -> None:
+        """Comme lancer_vers(), avec le niveau de DIR brut (test_5 : sens encore inconnu)."""
+        if self.en_marche:
+            raise RuntimeError(f"moteur {self.poste} : thread d'impulsions déjà en marche")
+        self._ports.ecrire_dir(self._bit_dir, niveau_dir)
+        self._lancer(budget, periodes, periode_suite)
+
+    def _lancer(self, budget: int, periodes: tuple, periode_suite: float) -> None:
         self._arret.clear()
-        self._budget = budget
-        self._surcourse = None
         self.pas = 0
         self.erreur = None
         self.retard_max_s = 0.0
-        periodes = () if lent else PERIODES_PROFIL[self.poste]
-        periode_lente = 1.0 / vitesse_lente_sps if vitesse_lente_sps else PERIODE_APPROCHE
-        self._thread = threading.Thread(target=self._impulsions, args=(periodes, periode_lente),
+        self._thread = threading.Thread(target=self._impulsions,
+                                        args=(budget, periodes, periode_suite),
                                         name=f"impulsions_{self.poste}", daemon=True)
         self._thread.start()
 
@@ -143,55 +189,28 @@ class Axe:
         return self._thread is not None and self._thread.is_alive()
 
     def demander_arret(self) -> None:
-        """Arrêt au pas suivant (défaut, arrêt programme)."""
+        """Arrêt au pas suivant (relâchement, butée, défaut, arrêt programme)."""
         self._arret.set()
-
-    def etendre_budget(self, budget: int) -> None:
-        """Repousse la borne de pas. Ne peut que l'augmenter."""
-        if budget > self._budget:
-            self._budget = budget
-
-    def demander_arret_apres(self, pas: int) -> None:
-        """Arrêt après encore `pas` pas (surcourse sur la fin de course). Premier appel seul retenu."""
-        if self._surcourse is None:
-            self._surcourse = max(0, int(pas))
 
     def attendre_fin(self, delai_s: float) -> bool:
         if self._thread is not None:
             self._thread.join(delai_s)
         return not self.en_marche
 
-    def liberer(self) -> None:
-        """ENA à « libre ». Accès I2C : boucle principale seulement."""
-        self._ports.ecrire_ena(self._bit_ena, excite=False)
-
-    def exciter(self) -> None:
-        """ENA à « excité » (couple de maintien). Boucle principale seulement."""
-        self._ports.ecrire_ena(self._bit_ena, excite=True)
-
-    def relacher(self) -> None:
-        """Fin de mouvement : libère le moteur, SAUF si MOTEUR_MAINTIEN_EN_POSITION."""
-        if not cfg.MOTEUR_MAINTIEN_EN_POSITION:
-            self.liberer()
-
     # ── Côté thread d'impulsions ──────────────────────────────────────────
 
-    def _impulsions(self, periodes: tuple, periode_lente: float) -> None:
+    def _impulsions(self, budget: int, periodes: tuple, periode_suite: float) -> None:
         largeur_s = cfg.MOTEUR_LARGEUR_IMPULSION_US * 1e-6
-        reste = None
-        t_prochain = time.perf_counter()
+        # Fiche du driver : DIR stable avant le premier front. Attendu ICI,
+        # pas dans la boucle principale, qui ne doit jamais s'arrêter.
+        t_prochain = time.perf_counter() + cfg.MOTEUR_DIR_AVANT_PAS_S
         try:
-            while self.pas < self._budget and not self._arret.is_set():
-                if reste is None and self._surcourse is not None:
-                    reste = self._surcourse
-                if reste is not None:
-                    if reste <= 0:
-                        break
-                    reste -= 1
-
+            while self.pas < budget and not self._arret.is_set():
                 attente = t_prochain - time.perf_counter()
                 if attente > 0:
                     time.sleep(attente)
+                    if self._arret.is_set():
+                        break
                 # Diagnostic : de combien cette impulsion part-elle après son
                 # échéance ? Un long retard (Python, système) fige le rotor puis
                 # le relance à pleine vitesse : cause possible de décrochage.
@@ -208,7 +227,7 @@ class Axe:
                 t_pas = time.perf_counter()
                 self.pas += 1
 
-                periode = periodes[self.pas] if self.pas < len(periodes) else periode_lente
+                periode = periodes[self.pas] if self.pas < len(periodes) else periode_suite
                 # Échéance comptée depuis le pas RÉELLEMENT émis : un retard (GIL,
                 # ordonnanceur) ralentit le moteur, il ne provoque jamais de rafale.
                 t_prochain = t_pas + periode

@@ -68,6 +68,7 @@ validée avant la suivante.
 | 2026-10-27 | Initialisation en deux passes de chaque côté : rapide pour trouver la butée, recul, lente pour la confirmer. |
 | 2026-10-27 | Dépassement possible à l'initialisation (plage nominale + marge) accepté. |
 | 2026-10-27 | LOGIQUE.md V3 validé (version 3.1). |
+| 2026-10-27 | Trouvé sur banc logiciel : le recul de confirmation est compté depuis le relâchement de la butée (sinon D4 à tort après un D1). |
 | 2026-10-27 | ACQUITTEMENT en marche recentre les deux postes ; il rouvre d'abord le mandrin s'il est fermé ; refusé pour un poste occupé. |
 | 2026-10-27 | Un poste fait une chose à la fois (§ 4.5). |
 | 2026-10-27 | Demi-courant à l'arrêt gardé (SW4 = OFF) : pas besoin du courant plein pendant la coupe. |
@@ -139,7 +140,8 @@ Toutes tranchées le 2026-10-27 (voir § 3).
 - [x] 2026-10-27 — `LOGIQUE.md` réécrit pour la V3 (projet 3.0)
 - [x] 2026-10-27 — `LOGIQUE.md` validé par Julien (3.1)
 - [x] 2026-10-27 — `config.py` écrit pour la V3
-- [ ] `config.py` relu et validé par Julien
-- [ ] Code (`main.py`, `libs/`)
-- [ ] Scripts de test (`tests/`)
+- [x] 2026-10-27 — `config.py` validé par Julien
+- [x] 2026-10-27 — code (`main.py`, `libs/`) écrit et vérifié sur banc logiciel (45 vérifications)
+- [x] 2026-10-27 — scripts de test 1 à 8 adaptés ; 1, 4, 6, 7, 8 et `main.py` exécutés sur banc logiciel
+- [x] 2026-10-27 — README réécrit pour la V3
 - [ ] Essais machine

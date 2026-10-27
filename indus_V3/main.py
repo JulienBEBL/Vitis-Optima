@@ -43,44 +43,41 @@ def _handler_arret(sig, _frame):
 
 def _afficher_config(log):
     log.info("Configuration :")
-    log.info("    maître %s, retard aller %.2f s", cfg.MOTEUR_MAITRE, cfg.RETARD_SENS_ALLER_S)
+    log.info("    %d pas/tr (%.2f pas/°), rampes %s de %.1f s",
+             cfg.DRIVER_PAS_PAR_TOUR, cfg.PAS_PAR_DEGRE,
+             "en S" if cfg.MOTEUR_RAMPES_EN_S else "droites", cfg.DUREE_RAMPE_ROTATION_S)
+    log.info("    rotation : démarrage %.1f°/s, croisière %.1f°/s (%.0f pas/s) ; recentrage %.1f°/s",
+             cfg.VITESSE_DEMARRAGE_DEG_S, cfg.VITESSE_CROISIERE_DEG_S, cfg.VITESSE_CROISIERE_SPS,
+             cfg.VITESSE_RECENTRAGE_DEG_S)
+    log.info("    initialisation : passe rapide %.1f°/s, recul %.1f°, passe lente %.1f°/s, "
+             "premier sens %s", cfg.VITESSE_RECHERCHE_RAPIDE_DEG_S, cfg.RECUL_CONFIRMATION_DEG,
+             cfg.VITESSE_RECHERCHE_LENTE_DEG_S, cfg.INIT_PREMIER_SENS)
     for poste in cfg.POSTES:
-        log.info("    %s : course %.1f° = %d pas, budget %d pas, DIR vers ligaturage = %d, "
-                 "max %.0f pas/s, accél. %.0f / décél. %.0f pas/s², "
-                 "pointe atteinte %.0f pas/s, rampes %d / %d pas",
-                 poste, cfg.MOTEUR_COURSE_DEGRES[poste], cfg.MOTEUR_COURSE_PAS[poste],
-                 cfg.MOTEUR_BUDGET_PAS[poste], cfg.DIR_VERS_LIGATURAGE[poste],
-                 cfg.MOTEUR_VITESSE_MAX_SPS[poste], cfg.MOTEUR_ACCEL_SPS2[poste],
-                 cfg.MOTEUR_DECEL_SPS2[poste],
-                 cfg.MOTEUR_VITESSE_POINTE_SPS[poste], cfg.MOTEUR_ACCEL_PAS[poste],
-                 cfg.MOTEUR_DECEL_PAS[poste])
-    log.info("    approche %.0f pas/s sur %d pas, marge %.1f°, rampes %s",
-             cfg.MOTEUR_VITESSE_APPROCHE_SPS, cfg.MOTEUR_APPROCHE_PAS,
-             cfg.MOTEUR_MARGE_DEG, "en S" if cfg.MOTEUR_RAMPES_EN_S else "droites")
-    log.info("    coupe %.2f + %.2f + %.2f s, bridage %.2f s, garde %.2f s",
+        log.info("    %s : plage nominale %.1f° ± %.1f°, DIR vers horaire = %d, ROTATION + = %s",
+                 poste, cfg.PLAGE_NOMINALE_DEG[poste], cfg.PLAGE_TOLERANCE_DEG,
+                 cfg.DIR_VERS_HORAIRE[poste], cfg.SENS_ROTATION_PLUS[poste])
+    log.info("    marge de dépassement %.1f° (tuyau), dégagement max %.1f°",
+             cfg.MARGE_DEPASSEMENT_DEG, cfg.DEGAGEMENT_MAX_DEG)
+    log.info("    coupe %.2f + %.2f + %.2f s, mandrin %.2f s, garde %.2f s",
              cfg.TEMPS_AVANT_COUPE_S, cfg.TEMPS_COUPE_S, cfg.TEMPS_APRES_COUPE_S,
-             cfg.TEMPS_MANOEUVRE_BRIDAGE_S, cfg.TEMPS_GARDE_APRES_ACTION_S)
+             cfg.TEMPS_MANOEUVRE_MANDRIN_S, cfg.TEMPS_GARDE_APRES_ACTION_S)
     log.info("    boucle %d Hz", cfg.FREQUENCE_BOUCLE_HZ)
 
 
-def _construire_machine(materiel: Materiel) -> Machine:
+def _construire_machine(materiel: Materiel, compteurs=None) -> Machine:
+    """Assemble la machine. `compteurs` : remplacés par les scripts de test."""
     drivers = PortsDrivers(materiel.drivers)
     entrees = Entrees(materiel.relais, materiel.entrees)
     buzzer = Buzzer(materiel.puce)
-    compteurs = Compteurs()
+    if compteurs is None:
+        compteurs = Compteurs()
     axes = {
         cfg.POSTE_MERE: Axe(cfg.POSTE_MERE, materiel.puce, cfg.PUL_MERE,
                             cfg.DIR_MERE, cfg.ENA_MERE, drivers),
         cfg.POSTE_FILLE: Axe(cfg.POSTE_FILLE, materiel.puce, cfg.PUL_FILLE,
                              cfg.DIR_FILLE, cfg.ENA_FILLE, drivers),
     }
-    postes = {
-        nom: Poste(nom, axes[nom],
-                   entrees.capteur(nom, cfg.POSITION_COUPE),
-                   entrees.capteur(nom, cfg.POSITION_LIGATURAGE),
-                   compteurs, buzzer)
-        for nom in cfg.POSTES
-    }
+    postes = {nom: Poste(nom, axes[nom], entrees, compteurs, buzzer) for nom in cfg.POSTES}
     return Machine(materiel, entrees, postes, drivers, buzzer, compteurs)
 
 
@@ -118,8 +115,8 @@ def main() -> int:
     log.info("═══ Démarrage Vitis Optima indus V3 ═══")
     _afficher_config(log)
 
-    # Le thread d'impulsions doit récupérer le GIL dès que son pas arrive à
-    # échéance, pas 5 ms plus tard (valeur par défaut de Python).
+    # Les threads d'impulsions doivent récupérer le GIL dès que leur pas arrive
+    # à échéance, pas 5 ms plus tard (valeur par défaut de Python).
     sys.setswitchinterval(cfg.PYTHON_SWITCH_INTERVAL_S)
 
     materiel = Materiel()
@@ -129,7 +126,7 @@ def main() -> int:
         materiel.ouvrir()
         machine = _construire_machine(materiel)
         # Tous les objets durables existent : on les sort du ramasse-miettes,
-        # dont une passe complète pourrait figer le thread d'impulsions.
+        # dont une passe complète pourrait figer les threads d'impulsions.
         gc.freeze()
         _boucle(machine, log)
         log.info("Arrêt demandé")

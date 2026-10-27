@@ -101,47 +101,99 @@ def attendre_entree(texte: str = "Entrée pour continuer, Ctrl+C pour quitter.")
     input(f"\n  {texte}")
 
 
-def deplacer(axe, entrees, poste: str, cible: str, lent: bool, budget: int) -> tuple:
-    """Mouvement jusqu'à la fin de course `cible`, arrêt comme le programme
-    principal (lectures consécutives, puis surcourse). Moteur libéré à la fin.
+class CompteursMuets:
+    """Remplace libs.journal.Compteurs : les essais ne comptent pas dans etat/compteurs.json."""
 
-    Renvoie (pas au moment de la détection ou None, pas total effectués).
+    def bouton(self, *_, **__):
+        pass
+
+    def actionneur(self, *_, **__):
+        pass
+
+    def defaut(self, *_, **__):
+        pass
+
+    def sauver(self):
+        pass
+
+    def sauver_si_du(self, *_, **__):
+        pass
+
+
+def construire_postes(materiel, noms=None) -> tuple:
+    """Le VRAI code des postes (libs/poste.py), sans machine.py : pour les tests
+    de mouvement. Les relais ne sont pas
+    pilotés (mandrins ouverts, lames hautes). Renvoie (entrees, {nom: Poste}, buzzer)."""
+    from libs.entrees import Entrees
+    from libs.materiel import Buzzer
+    from libs.moteur import Axe, PortsDrivers
+    from libs.poste import Poste
+    drivers = PortsDrivers(materiel.drivers)
+    entrees = Entrees(materiel.relais, materiel.entrees)
+    buzzer = Buzzer(materiel.puce)
+    broches = {cfg.POSTE_MERE: (cfg.PUL_MERE, cfg.DIR_MERE, cfg.ENA_MERE),
+               cfg.POSTE_FILLE: (cfg.PUL_FILLE, cfg.DIR_FILLE, cfg.ENA_FILLE)}
+    postes = {}
+    for nom in (noms or cfg.POSTES):
+        axe = Axe(nom, materiel.puce, *broches[nom], drivers)
+        postes[nom] = Poste(nom, axe, entrees, CompteursMuets(), buzzer)
+    return entrees, postes, buzzer
+
+
+def tourner(entrees, postes: dict, condition, delai_s: float, quoi: str, buzzer=None) -> float:
+    """Boucle à FREQUENCE_BOUCLE_HZ, comme main.py, jusqu'à `condition()`.
+
+    Lève libs.poste.Defaut comme le programme, et TimeoutError au-delà de
+    `delai_s`. Renvoie la durée.
     """
-    capteur = entrees.capteur(poste, cible)
-    entrees.rafraichir(time.monotonic())
-    if capteur.brut:
-        print(f"  Fin de course {cible} déjà active : aucun mouvement.")
-        return 0, 0
-    direction = (cfg.DIR_VERS_LIGATURAGE if cible == cfg.POSITION_LIGATURAGE
-                 else cfg.DIR_VERS_COUPE)[poste]
-    axe.preparer(direction)
-    axe.lancer(budget, lent)
-    pas_capteur = None
-    try:
-        while axe.en_marche:
-            entrees.rafraichir(time.monotonic())
-            if pas_capteur is None and capteur.consecutifs >= cfg.CAPTEUR_LECTURES_ARRET:
-                pas_capteur = axe.pas
-                axe.demander_arret_apres(cfg.MOTEUR_SURCOURSE_PAS)
-            time.sleep(cfg.PERIODE_BOUCLE_S)
-    finally:
-        axe.demander_arret()
-        axe.attendre_fin(cfg.ARRET_THREAD_MAX_S)
-        axe.relacher()     # reste excité si MOTEUR_MAINTIEN_EN_POSITION
-    if axe.erreur is not None:
-        raise RuntimeError(f"génération d'impulsions interrompue : {axe.erreur}")
-    return pas_capteur, axe.pas
+    debut = time.monotonic()
+    prochain = debut
+    while True:
+        maintenant = time.monotonic()
+        entrees.rafraichir(maintenant)
+        for poste in postes.values():
+            poste.avancer(maintenant)
+        if buzzer is not None:
+            buzzer.avancer(maintenant)
+        if condition():
+            return maintenant - debut
+        if maintenant - debut > delai_s:
+            raise TimeoutError(f"{quoi} : pas terminé après {delai_s:.0f} s")
+        prochain += cfg.PERIODE_BOUCLE_S
+        reste = prochain - time.monotonic()
+        if reste > 0:
+            time.sleep(reste)
+        else:
+            prochain = time.monotonic()
 
 
-def pas_a_vide(axe, direction: int, nombre: int) -> int:
-    """`nombre` pas à vitesse d'approche, SANS surveiller les fins de course."""
-    axe.preparer(direction)
-    axe.lancer(nombre, lent=True)
-    try:
-        while axe.en_marche:
-            time.sleep(cfg.PERIODE_BOUCLE_S)
-    finally:
-        axe.demander_arret()
-        axe.attendre_fin(cfg.ARRET_THREAD_MAX_S)
-        axe.relacher()     # reste excité si MOTEUR_MAINTIEN_EN_POSITION
-    return axe.pas
+def initialiser(entrees, postes: dict, buzzer=None, delai_s: float = 90.0) -> float:
+    """Initialisation réelle (deux butées en deux passes, puis centrage) des postes donnés.
+
+    Un poste déjà initialisé est d'abord remis en attente : sinon ACQUITTEMENT
+    ne ferait qu'un recentrage."""
+    from libs.poste import ATTENTE_ACQUITTEMENT, PRET
+    maintenant = time.monotonic()
+    entrees.rafraichir(maintenant)
+    for _ in range(12):                     # remplir l'anti-rebond des butées
+        entrees.rafraichir(time.monotonic())
+        time.sleep(cfg.PERIODE_BOUCLE_S)
+    for poste in postes.values():
+        if poste.etat != ATTENTE_ACQUITTEMENT:
+            poste.neutraliser(ATTENTE_ACQUITTEMENT)
+            poste.axe.attendre_fin(cfg.ARRET_THREAD_MAX_S)
+        poste.acquitter(time.monotonic())
+    return tourner(entrees, postes, lambda: all(p.etat == PRET for p in postes.values()),
+                   delai_s, "initialisation", buzzer)
+
+
+def arreter_postes(postes: dict) -> None:
+    """Arrêt de sécurité des postes d'un test : moteurs arrêtés puis libres."""
+    for poste in postes.values():
+        poste.neutraliser()
+    for poste in postes.values():
+        poste.axe.attendre_fin(cfg.ARRET_THREAD_MAX_S)
+        try:
+            poste.axe.liberer()
+        except OSError:
+            pass

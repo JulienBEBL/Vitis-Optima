@@ -1,22 +1,21 @@
 # -*- coding: utf-8 -*-
 """
-machine.py — Coordinateur : état global, initialisation, défauts, règles entre postes.
+machine.py — La boucle des deux postes : entrées, appuis, sorties, défauts du bus.
 
-LOGIQUE.md § 3.1, § 4.1, § 5 et § 6.
+LOGIQUE.md § 4 à § 6 et § 9.
 
-Répartition stricte :
-  - le POSTE décide de son bridage, de sa coupe, de son axe et de ses propres
-    interlocks (I2 à I6) ;
-  - le COORDINATEUR décide de l'état global, de l'initialisation, du défaut et
-    des règles entre postes (I1, I7, I8). Il autorise ou refuse une demande ;
-    il ne la pilote pas. Un poste n'appelle jamais l'autre.
+En V3 les deux postes sont TOTALEMENT INDÉPENDANTS : il n'y a plus de
+coordinateur ni de règle entre postes (plus de maître / esclave). Ce module ne
+fait que :
+  - lire les entrées une fois par tour et faire avancer les deux postes ;
+  - transmettre chaque appui au poste concerné, qui l'accepte ou le refuse ;
+  - distribuer ACQUITTEMENT, seul bouton commun, aux deux postes ;
+  - composer l'octet des relais depuis les deux postes ;
+  - traiter les défauts : un défaut de POSTE n'arrête que ce poste ; un défaut
+    du BUS (D6) ou d'un MCP (D7), matériel commun, arrête les deux.
 
-C'est aussi le coordinateur qui compose l'octet des relais : à partir des
-variables ev_* des postes en MARCHE, et à 0 dans tous les autres états.
-
-Origine : Vitis V1 indus/vitis_optima.py — fonction `boucle()` (une lecture
-par tour, priorité de RESET) et méthode `Machine._appliquer()` (octet composé
-depuis l'état, jamais de lecture-modification-écriture).
+Origine : indus V2 libs/machine.py (une lecture par tour, octet composé depuis
+l'état, relecture des MCP, chemin de défaut unique), allégé de la coordination.
 """
 
 from __future__ import annotations
@@ -24,20 +23,13 @@ from __future__ import annotations
 import logging
 
 import config as cfg
-from libs.materiel import PORT_A, Buzzer, Materiel
-from libs.entrees import Entrees
+from libs.entrees import ACQUITTEMENT, ACTIONS, ROTATION_MOINS, ROTATION_PLUS, Entrees
 from libs.journal import Compteurs
+from libs.materiel import PORT_A, Buzzer, Materiel
 from libs.moteur import PortsDrivers
-from libs.poste import (BRIDAGE, COUPE, DESCRIPTION_DEFAUTS, POSITION, PRET_COUPE, PRET_LIGATURAGE,
-                        Defaut, Poste)
+from libs.poste import ATTENTE_ACQUITTEMENT, DEFAUT, DESCRIPTION_DEFAUTS, Defaut, Poste
 
 log = logging.getLogger("vitis")
-
-# États globaux
-ATTENTE_ACQUITTEMENT = "ATTENTE_ACQUITTEMENT"
-INITIALISATION = "INITIALISATION"
-MARCHE = "MARCHE"
-DEFAUT = "DEFAUT"
 
 
 class Machine:
@@ -50,26 +42,19 @@ class Machine:
         self._buzzer = buzzer
         self._compteurs = compteurs
 
-        self._postes = (postes[cfg.POSTE_MERE], postes[cfg.POSTE_FILLE])
-        self.maitre = postes[cfg.MOTEUR_MAITRE]
-        self.esclave = postes[cfg.POSTE_FILLE if cfg.MOTEUR_MAITRE == cfg.POSTE_MERE
-                              else cfg.POSTE_MERE]
-        self._bits_ev = {cfg.POSTE_MERE: (cfg.EV_BRIDAGE_MERE, cfg.EV_COUPE_MERE),
-                         cfg.POSTE_FILLE: (cfg.EV_BRIDAGE_FILLE, cfg.EV_COUPE_FILLE)}
+        self.postes = postes
+        self._bits_ev = {cfg.POSTE_MERE: (cfg.EV_MANDRIN_MERE, cfg.EV_COUPE_MERE),
+                         cfg.POSTE_FILLE: (cfg.EV_MANDRIN_FILLE, cfg.EV_COUPE_FILLE)}
 
-        self.etat = ATTENTE_ACQUITTEMENT
-        self._phase_init = None                 # "pinces" | "esclave" | "maitre"
-        self._fin_ouverture_pinces = 0.0
         self._prochaine_verif_mcp = 0.0
         self._ecarts_mcp: dict[int, int] = {}   # adresse → relectures fausses consécutives
         self._bus_en_erreur = False
 
-        log.info("Maître : %s — esclave : %s", self.maitre.nom, self.esclave.nom)
-        log.info("En attente d'ACQUITTEMENT pour initialiser")
+        log.info("En attente d'ACQUITTEMENT pour initialiser les deux postes")
 
     @property
     def mouvement_en_cours(self) -> bool:
-        return any(poste.en_mouvement for poste in self._postes)
+        return any(poste.en_mouvement for poste in self.postes.values())
 
     # ═══════════════════════════════════════════════════════════════════════
     #  UN TOUR DE BOUCLE  (LOGIQUE.md § 9)
@@ -82,24 +67,26 @@ class Machine:
                 log.info("Bus I2C rétabli")
                 self._bus_en_erreur = False
 
-            if self.etat in (INITIALISATION, MARCHE):
-                for poste in self._postes:
+            for poste in self.postes.values():
+                try:
                     poste.avancer(maintenant)
-                if self.etat == INITIALISATION:
-                    self._avancer_initialisation(maintenant)
+                except Defaut as defaut:
+                    self._declencher_defaut((poste,), defaut.code, defaut.detail)
 
             self._traiter_boutons(maintenant)
             self._ecrire_sorties()
             self._verifier_mcp(maintenant)
 
         except Defaut as defaut:
-            self._declencher_defaut(defaut.code, defaut.detail)
+            # Seul D7 remonte jusqu'ici : un MCP est commun aux deux postes.
+            self._declencher_defaut(tuple(self.postes.values()), defaut.code, defaut.detail)
         except OSError as erreur:
             # Politique I2C : le driver a déjà retenté I2C_RETRIES fois. Au-delà,
-            # c'est un défaut. En DÉFAUT, on continue d'essayer à chaque tour
-            # (pour lire ACQUITTEMENT), sans inonder le journal.
-            if self.etat != DEFAUT:
-                self._declencher_defaut("D6", str(erreur))
+            # c'est un défaut des deux postes. En DÉFAUT, on continue d'essayer à
+            # chaque tour (pour lire ACQUITTEMENT), sans inonder le journal.
+            vivants = tuple(p for p in self.postes.values() if p.etat != DEFAUT)
+            if vivants:
+                self._declencher_defaut(tuple(self.postes.values()), "D6", str(erreur))
             elif not self._bus_en_erreur:
                 log.error("Bus I2C toujours en erreur : %s", erreur)
             self._bus_en_erreur = True
@@ -108,84 +95,47 @@ class Machine:
         self._compteurs.sauver_si_du(maintenant, autorise=not self.mouvement_en_cours)
 
     # ═══════════════════════════════════════════════════════════════════════
-    #  BOUTONS ET INTERLOCKS
+    #  BOUTONS  (les interlocks sont dans le poste)
     # ═══════════════════════════════════════════════════════════════════════
 
     def _traiter_boutons(self, maintenant: float) -> None:
-        if self._entrees.appui("acquittement"):
-            if self.etat in (ATTENTE_ACQUITTEMENT, DEFAUT):
-                self._accepter("acquittement")
-                self._entrer_initialisation(maintenant)
-            elif self.etat == MARCHE:
-                # Retour au départ : seulement si aucun poste n'est en train d'agir.
-                occupes = [p.nom for p in self._postes
-                           if p.etat not in (PRET_COUPE, PRET_LIGATURAGE) or maintenant < p.libre_a]
-                if occupes:
-                    self._refuser("acquittement", f"action en cours ({', '.join(occupes)})")
-                else:
-                    self._accepter("acquittement")
-                    self._entrer_initialisation(maintenant, retour_au_depart=True)
-            else:
-                self._refuser("acquittement", f"sans effet en {self.etat}")
+        if self._entrees.appui(ACQUITTEMENT):
+            self._acquitter(maintenant)
 
-        for poste in self._postes:
-            for action in (BRIDAGE, COUPE, POSITION):
+        for poste in self.postes.values():
+            for action in ACTIONS:
                 nom = f"{action}_{poste.nom}"
                 if not self._entrees.appui(nom):
                     continue
-                motif = self._motif_refus(poste, action, maintenant)
+                motif = poste.refus(action, maintenant)
                 if motif:
                     self._refuser(nom, motif)
                     continue
-                self._accepter(nom)
-                if action == BRIDAGE and poste.etat == PRET_LIGATURAGE:
-                    # Fin de cycle : un seul appui ouvre les DEUX pinces.
-                    log.info("Fin de cycle : ouverture des deux pinces")
-                    poste.lancer_bridage(maintenant)
-                    self._autre(poste).lancer_bridage(maintenant, bip_fin=False)
-                elif action == BRIDAGE:
-                    poste.lancer_bridage(maintenant)
-                elif action == COUPE:
-                    poste.lancer_coupe(maintenant)
-                else:
-                    poste.lancer_mouvement(maintenant)
+                # Rotation acceptée : pas de bip, il sonnerait à chaque petit coup.
+                self._compteurs.bouton(nom, accepte=True)
+                if action not in (ROTATION_PLUS, ROTATION_MOINS):
+                    self._buzzer.bip_court()
+                poste.lancer(action, maintenant)
 
-    def _motif_refus(self, poste: Poste, action: str, maintenant: float) -> str | None:
-        """Interlocks dans l'ordre de LOGIQUE.md § 5. Le premier qui échoue gagne."""
-        if self.etat != MARCHE:
-            return f"I1 — machine en {self.etat}"
-        motif = poste.refus_local(action, maintenant)
-        if motif:
-            return motif
-        if action == BRIDAGE and poste.etat == PRET_LIGATURAGE:
-            autre = self._autre(poste)
-            if autre.etat != PRET_LIGATURAGE:
-                return f"I5 — ouverture des pinces seulement les deux axes en ligaturage ({autre.nom} n'y est pas)"
-            motif_autre = autre.refus_local(BRIDAGE, maintenant)
-            if motif_autre:
-                return f"{autre.nom} : {motif_autre}"
-            return None
-        if action != POSITION:
-            return None
-
-        aller = poste.etat == PRET_COUPE
-        if aller and poste is self.esclave:
-            if self.maitre.position != cfg.POSITION_LIGATURAGE:
-                return f"I7 — le maître ({self.maitre.nom}) doit être en ligaturage d'abord"
-            if maintenant < self.maitre.arrive_a + cfg.RETARD_SENS_ALLER_S:
-                return "I7 — délai après l'arrivée du maître non écoulé"
-        if aller and poste is self.maitre and self.esclave.position != cfg.POSITION_COUPE:
-            # Garde défensive : l'esclave hors position coupe avec le maître en
-            # coupe est inatteignable (le retour se fait toujours esclave d'abord).
-            return f"I7 — l'esclave ({self.esclave.nom}) doit être en position coupe"
-        return None
-
-    def _autre(self, poste: Poste) -> Poste:
-        return self.esclave if poste is self.maitre else self.maitre
-
-    def _accepter(self, nom: str) -> None:
-        self._compteurs.bouton(nom, accepte=True)
+    def _acquitter(self, maintenant: float) -> None:
+        """Un seul bouton pour deux postes : chacun l'exécute s'il le peut."""
+        acceptes, motifs = [], []
+        for poste in self.postes.values():
+            motif = poste.refus_acquittement(maintenant)
+            if motif:
+                motifs.append(f"{poste.nom} : {motif}")
+            else:
+                acceptes.append(poste)
+        for motif in motifs:
+            log.info("Appui %s refusé pour %s", ACQUITTEMENT, motif)
+        if not acceptes:
+            self._compteurs.bouton(ACQUITTEMENT, accepte=False)
+            self._buzzer.bip_refus()
+            return
+        self._compteurs.bouton(ACQUITTEMENT, accepte=True)
         self._buzzer.bip_court()
+        for poste in acceptes:
+            poste.acquitter(maintenant)
 
     def _refuser(self, nom: str, motif: str) -> None:
         self._compteurs.bouton(nom, accepte=False)
@@ -193,77 +143,38 @@ class Machine:
         log.info("Appui %s refusé : %s", nom, motif)
 
     # ═══════════════════════════════════════════════════════════════════════
-    #  INITIALISATION  (esclave puis maître)
-    # ═══════════════════════════════════════════════════════════════════════
-
-    def _entrer_initialisation(self, maintenant: float, retour_au_depart: bool = False) -> None:
-        """Au démarrage, après un défaut, ou en marche (retour au départ).
-
-        Hors MARCHE, les relais sont à 0 : les pinces s'ouvrent. Si une pince était
-        fermée, on attend TEMPS_MANOEUVRE_BRIDAGE_S avant de bouger un axe : il ne
-        doit jamais partir en tirant sur une branche encore pincée.
-        """
-        pince_fermee = any(poste.ev_bridage or poste.bride for poste in self._postes)
-        log.info("%s : %sréférencement %s puis %s",
-                 "Retour au départ" if retour_au_depart else "Initialisation",
-                 "ouverture des pinces, puis " if pince_fermee else "",
-                 self.esclave.nom, self.maitre.nom)
-        self.etat = INITIALISATION
-        for poste in self._postes:
-            poste.neutraliser()                 # repart d'un état propre, pinces ouvertes
-        if pince_fermee:
-            self._phase_init = "pinces"
-            self._fin_ouverture_pinces = maintenant + cfg.TEMPS_MANOEUVRE_BRIDAGE_S
-        else:
-            self._phase_init = "esclave"
-            self.esclave.lancer_referencement(maintenant)
-
-    def _avancer_initialisation(self, maintenant: float) -> None:
-        if self._phase_init == "pinces" and maintenant >= self._fin_ouverture_pinces:
-            self._phase_init = "esclave"
-            self.esclave.lancer_referencement(maintenant)
-        if self._phase_init == "esclave" and self.esclave.etat == PRET_COUPE:
-            self._phase_init = "maitre"
-            self.maitre.lancer_referencement(maintenant)
-        if self._phase_init == "maitre" and self.maitre.etat == PRET_COUPE:
-            self._phase_init = None
-            self.etat = MARCHE
-            for poste in self._postes:
-                poste.libre_a = maintenant + cfg.TEMPS_GARDE_APRES_ACTION_S
-            self._buzzer.double_bip()
-            log.info("Machine prête")
-
-    # ═══════════════════════════════════════════════════════════════════════
     #  SORTIES
     # ═══════════════════════════════════════════════════════════════════════
 
     def _ecrire_sorties(self) -> None:
-        """Octet des relais composé depuis l'état, écrit seulement s'il change.
+        """Octet des relais composé depuis les deux postes, écrit seulement s'il change.
 
-        Hors MARCHE, il vaut 0 quoi que disent les postes. Une écriture ratée
-        n'a pas mis l'image à jour : elle est retentée au tour suivant.
+        Un poste en attente ou en défaut a ses ev_* à 0 (Poste.neutraliser).
+        Une écriture ratée n'a pas mis l'image à jour : elle est retentée au
+        tour suivant.
         """
         octet = 0x00
-        if self.etat == MARCHE:
-            for poste in self._postes:
-                bit_bridage, bit_coupe = self._bits_ev[poste.nom]
-                if poste.ev_bridage:
-                    octet |= 1 << bit_bridage
-                if poste.ev_coupe:
-                    octet |= 1 << bit_coupe
+        for poste in self.postes.values():
+            bit_mandrin, bit_coupe = self._bits_ev[poste.nom]
+            if poste.ev_mandrin:
+                octet |= 1 << bit_mandrin
+            if poste.ev_coupe:
+                octet |= 1 << bit_coupe
         if octet != self._materiel.relais.image(PORT_A):
             self._materiel.relais.ecrire_port(PORT_A, octet)
 
-        # Au repos et en défaut, les moteurs sont libres. Retenté à chaque tour
-        # si l'écriture du défaut a échoué.
-        if self.etat in (ATTENTE_ACQUITTEMENT, DEFAUT) and not self._drivers.tous_libres():
-            self._drivers.liberer_tous()
+        # Avant l'initialisation et en défaut, le moteur du poste est libre.
+        # Retenté à chaque tour si l'écriture du défaut a échoué.
+        for poste in self.postes.values():
+            if poste.etat in (ATTENTE_ACQUITTEMENT, DEFAUT) and not poste.axe.libre:
+                poste.axe.liberer()
 
     def _verifier_mcp(self, maintenant: float) -> None:
         """D7 : relecture périodique de la configuration des trois MCP."""
         if maintenant < self._prochaine_verif_mcp:
             return
         self._prochaine_verif_mcp = maintenant + cfg.RELECTURE_CONFIG_MCP_PERIODE_S
+        tous_en_defaut = all(p.etat == DEFAUT for p in self.postes.values())
         for mcp in (self._materiel.relais, self._materiel.drivers, self._materiel.entrees):
             ecarts = mcp.ecarts_config()
             if not ecarts:
@@ -271,9 +182,9 @@ class Machine:
                 continue
             consecutifs = self._ecarts_mcp.get(mcp.adresse, 0) + 1
             self._ecarts_mcp[mcp.adresse] = consecutifs
-            # Déjà en DÉFAUT : on se contente de reconfigurer, pour continuer à
-            # lire ACQUITTEMENT. Un seul avertissement par série.
-            if consecutifs >= 2 and self.etat != DEFAUT:
+            # Les deux postes déjà en DÉFAUT : on se contente de reconfigurer, pour
+            # continuer à lire ACQUITTEMENT. Un seul avertissement par série.
+            if consecutifs >= 2 and not tous_en_defaut:
                 raise Defaut("D7", f"MCP 0x{mcp.adresse:02X} : {', '.join(ecarts)}")
             if consecutifs == 1:
                 log.warning("MCP 0x%02X : configuration perdue (%s) — reconfiguration",
@@ -284,37 +195,33 @@ class Machine:
     #  DÉFAUT ET ARRÊT
     # ═══════════════════════════════════════════════════════════════════════
 
-    def _declencher_defaut(self, code: str, detail: str) -> None:
-        """Réaction commune à tout défaut (LOGIQUE.md § 6). Global : les deux postes."""
-        log.error("DÉFAUT %s — %s : %s", code, DESCRIPTION_DEFAUTS[code], detail)
-        for poste in self._postes:
+    def _declencher_defaut(self, postes: tuple, code: str, detail: str) -> None:
+        """Réaction à un défaut (LOGIQUE.md § 6), pour les postes concernés seulement."""
+        noms = " + ".join(poste.nom for poste in postes)
+        log.error("DÉFAUT %s [%s] — %s : %s", code, noms, DESCRIPTION_DEFAUTS[code], detail)
+        for poste in postes:
             poste.neutraliser()
-        for poste in self._postes:
+        for poste in postes:
             if not poste.axe.attendre_fin(cfg.ARRET_THREAD_MAX_S):
                 log.error("%s : le thread d'impulsions ne s'arrête pas", poste.nom)
         try:
-            self._materiel.relais.ecrire_port(PORT_A, 0x00)
+            self._ecrire_sorties()          # relais du ou des postes à 0, moteurs libres
         except OSError as erreur:
-            log.error("Relais non remis à 0 (%s) — nouvelle tentative à chaque tour", erreur)
-        try:
-            self._drivers.liberer_tous()
-        except OSError as erreur:
-            log.error("ENA non remis à « libre » (%s) — nouvelle tentative à chaque tour", erreur)
-        self.etat = DEFAUT
-        self._phase_init = None
+            log.error("Sorties non remises en sécurité (%s) — nouvelle tentative à chaque tour", erreur)
         self._buzzer.bip_defaut()
-        self._compteurs.defaut(code)
+        for poste in postes:
+            self._compteurs.defaut(poste.nom, code)
         self._compteurs.sauver()
-        log.info("Appuyer sur ACQUITTEMENT pour relancer l'initialisation")
+        log.info("Appuyer sur ACQUITTEMENT pour relancer l'initialisation de %s", noms)
 
     def arreter(self) -> None:
-        """Arrêt du programme : axes arrêtés, buzzer coupé, compteurs sauvés.
+        """Arrêt du programme : moteurs arrêtés, buzzer coupé, compteurs sauvés.
 
         Relais et ENA sont remis en sécurité ensuite par Materiel.fermer().
         """
-        for poste in self._postes:
+        for poste in self.postes.values():
             poste.neutraliser()
-        for poste in self._postes:
+        for poste in self.postes.values():
             if not poste.axe.attendre_fin(cfg.ARRET_THREAD_MAX_S):
                 log.error("%s : le thread d'impulsions ne s'arrête pas", poste.nom)
         self._buzzer.couper()

@@ -21,7 +21,7 @@ bus = BusI2C(cfg.I2C_BUS_ID)
 manquants = 0
 for nom, adresse in (("relais + boutons", cfg.MCP_RELAIS_ADDR),
                      ("DIR + ENA drivers", cfg.MCP_DRIVERS_ADDR),
-                     ("fins de course + acquittement", cfg.MCP_ENTREES_ADDR)):
+                     ("butées + ACQUITTEMENT + ROTATION −", cfg.MCP_ENTREES_ADDR)):
     try:
         bus.lire(adresse, 0x00)
         print(f"  ✓ 0x{adresse:02X}  {nom}")

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-test_3_capteurs.py — Aperçu en direct des 4 fins de course.
+test_3_capteurs.py — Aperçu en direct des 4 butées de rotation (fins de course).
 
 Lecture seule : aucun relais, aucun ENA n'est écrit.
 
@@ -8,20 +8,23 @@ Lecture seule : aucun relais, aucun ENA n'est écrit.
     python3 tests/test_3_capteurs.py --attribution   refaire la correspondance
     python3 tests/test_3_capteurs.py --direct        bits bruts de tous les ports
 
-APERÇU : un voyant par fin de course, selon config.py (correspondance relevée
-sur machine le 2026-10-08). Galet actionné = voyant allumé. Signale si les
-deux fins de course d'un même axe sont actives ensemble (ce serait un défaut
-D2). Sert aussi au test de débranchement : galet actionné, débrancher le
+APERÇU : un voyant par butée, selon config.py. Galet actionné = voyant allumé.
+Signale si les deux butées d'un même poste sont actives ensemble (ce serait un
+défaut D2). Sert aussi au test de débranchement : galet actionné, débrancher le
 connecteur → le voyant doit S'ÉTEINDRE. Ctrl+C pour le bilan.
 
-Mode ATTRIBUTION (à refaire seulement si le câblage change) : le script nomme une fin de course (« MÈRE — position COUPE »…),
+Mode ATTRIBUTION (à faire au premier montage de la V3 : les capteurs ont été
+déplacés sur la rotation du mandrin) : le script nomme une butée (« MÈRE —
+butée HORAIRE »…),
 tu actionnes à la main le galet correspondant puis tu le relâches. Il note sur
 quel bit ça arrive et dans quel sens le bit bascule. À la fin il affiche les
 lignes CAP_* à recopier dans config.py. Il écoute tous les bits des ports
 d'entrée, quelle que soit la config actuelle. Ctrl+C pour abandonner.
 
-  Rappel : « position COUPE » et « position LIGATURAGE » sont les deux bouts
-  de course de chaque axe (ton min et ton max). À toi de dire lequel est lequel.
+  Rappel : HORAIRE et ANTIHORAIRE sont les deux bouts de la rotation du
+  mandrin, VUS DU CÔTÉ OPÉRATEUR, pour les deux postes. La butée HORAIRE est
+  celle que le mandrin atteint en tournant dans le sens des aiguilles d'une
+  montre. test_5_moteur.py vérifie ensuite que le moteur est d'accord.
 
 Mode DIRECT : les 8 bits bruts de chaque port et la liste de ceux qui ont
 bougé. Sert aussi au test de débranchement : galet actionné, débrancher le
@@ -39,12 +42,12 @@ PORTS = ("0x26 A", "0x26 B", "0x24 B")
 PERIODE_S = 0.01
 LECTURES_STABLES = 5      # un changement est retenu après 5 lectures identiques (50 ms)
 
-CAPTEURS = (("CAP_MERE_COUPE", "MÈRE  — position COUPE"),
-            ("CAP_MERE_LIGATURAGE", "MÈRE  — position LIGATURAGE"),
-            ("CAP_FILLE_COUPE", "FILLE — position COUPE"),
-            ("CAP_FILLE_LIGATURAGE", "FILLE — position LIGATURAGE"))
+CAPTEURS = (("CAP_MERE_HORAIRE", "MÈRE  — butée HORAIRE"),
+            ("CAP_MERE_ANTIHORAIRE", "MÈRE  — butée ANTIHORAIRE"),
+            ("CAP_FILLE_HORAIRE", "FILLE — butée HORAIRE"),
+            ("CAP_FILLE_ANTIHORAIRE", "FILLE — butée ANTIHORAIRE"))
 
-titre("TEST 3 — FINS DE COURSE")
+titre("TEST 3 — BUTÉES DE ROTATION")
 materiel = _commun.ouvrir_lecture_seule()
 
 
@@ -70,7 +73,7 @@ def differences(avant: dict, apres: dict) -> list:
 
 
 def mode_attribution() -> None:
-    print("  Tous les galets LIBRES pour commencer. Pour chaque fin de course")
+    print("  Tous les galets LIBRES pour commencer. Pour chaque butée")
     print("  annoncée : actionner le galet à la main, puis le relâcher.")
     print("  Ctrl+C pour abandonner.\n")
     repos = lire_stable()
@@ -78,7 +81,7 @@ def mode_attribution() -> None:
 
     attribution = {}          # constante → (port, bit, niveau galet actionné)
     for constante, libelle in CAPTEURS:
-        print(f"  → Actionne le galet {libelle:28s} … ", end="", flush=True)
+        print(f"  → Actionne le galet {libelle:26s} … ", end="", flush=True)
         while True:
             octets = lire_stable()
             diff = differences(repos, octets)
@@ -104,7 +107,7 @@ def mode_attribution() -> None:
     print("\n  À recopier dans config.py :\n")
     for constante, _ in CAPTEURS:
         port, bit, _niveau = attribution[constante]
-        print(f"    {constante:21s} = {bit}    # {port.replace(' ', ' GP')}{bit}")
+        print(f"    {constante:22s} = {bit}    # {port.replace(' ', ' GP')}{bit}")
 
     niveaux = {a[2] for a in attribution.values()}
     if niveaux == {0}:
@@ -113,7 +116,7 @@ def mode_attribution() -> None:
     elif niveaux == {1}:
         print("\n  ⚠ Les 4 passent à 1 quand le galet est actionné : c'est le contact NC qui est")
         print("    câblé. Passer sur le contact NO (recommandé : un fil coupé se lit alors")
-        print("    « pas en position »), ou mettre CAPTEURS_ACTIFS_BAS = False.")
+        print("    « pas en butée »), ou mettre CAPTEURS_ACTIFS_BAS = False.")
     else:
         print("\n  ⚠ Les capteurs ne basculent pas tous dans le même sens : câblage NO / NC")
         print("    mélangé. Le programme exige le même sens pour les quatre.")
@@ -151,33 +154,31 @@ def mode_direct() -> None:
 
 
 def mode_apercu() -> None:
-    cles = ((cfg.POSTE_MERE, cfg.POSITION_COUPE), (cfg.POSTE_MERE, cfg.POSITION_LIGATURAGE),
-            (cfg.POSTE_FILLE, cfg.POSITION_COUPE), (cfg.POSTE_FILLE, cfg.POSITION_LIGATURAGE))
+    cles = [(poste, sens) for poste in cfg.POSTES for sens in (cfg.SENS_ANTIHORAIRE, cfg.SENS_HORAIRE)]
     entrees = Entrees(materiel.relais, materiel.entrees)
     vus = {cle: False for cle in cles}
     d2_vu = False
     print("  Actionner les galets. Ctrl+C pour le bilan.\n")
-    print("  MÈRE coupe   MÈRE ligat.   FILLE coupe   FILLE ligat.   0x26 B")
+    print("  MÈRE anti.   MÈRE hor.    FILLE anti.  FILLE hor.    0x26 B")
     try:
         while True:
             entrees.rafraichir(time.monotonic())
             alerte = ""
             for poste in cfg.POSTES:
-                if (entrees.capteur(poste, cfg.POSITION_COUPE).stable
-                        and entrees.capteur(poste, cfg.POSITION_LIGATURAGE).stable):
-                    alerte = f"⚠ {poste} : LES DEUX actifs (D2)"
+                if all(entrees.butee(poste, sens).stable for sens in cfg.SENS):
+                    alerte = f"⚠ {poste} : LES DEUX actives (D2)"
                     d2_vu = True
             for cle in cles:
-                vus[cle] |= entrees.capteurs[cle].stable
-            print("\r  " + "".join(f"    {voyant(entrees.capteurs[cle].stable)}        " for cle in cles)
+                vus[cle] |= entrees.butees[cle].stable
+            print("\r  " + "".join(f"    {voyant(entrees.butees[cle].stable)}       " for cle in cles)
                   + f" {bits(entrees.octets['0x26_B'])}   {alerte:34s}", end="", flush=True)
             time.sleep(cfg.PERIODE_BOUCLE_S)
     except KeyboardInterrupt:
         print("\n\n  Bilan :")
-        for (poste, position), vu in vus.items():
-            print(f"    {poste:6s} {position:11s} {'✓ vu actif' if vu else '✗ jamais vu actif'}")
+        for (poste, sens), vu in vus.items():
+            print(f"    {poste:6s} {sens:12s} {'✓ vue active' if vu else '✗ jamais vue active'}")
         if d2_vu:
-            print("    ⚠ deux fins de course d'un même axe ont été vues actives ensemble")
+            print("    ⚠ les deux butées d'un même poste ont été vues actives ensemble")
         print()
 
 

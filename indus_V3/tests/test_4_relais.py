@@ -2,8 +2,8 @@
 """
 test_4_relais.py — Qui est qui : quel relais pilote quelle électrovanne.
 
-⚠ CE TEST ACTIONNE LES VÉRINS, LAMES COMPRISES. Air comprimé branché, mains
-   hors des lames et des pinces. Les moteurs ne bougent pas.
+⚠ CE TEST ACTIONNE LES MANDRINS ET LES LAMES. Air comprimé branché, mains
+   hors des lames et des mandrins. Les moteurs ne bougent pas.
 
     python3 tests/test_4_relais.py
 
@@ -11,20 +11,20 @@ IDENTIFICATION (automatique, tu observes et tu réponds)
   Le script essaie l'un après l'autre les 6 relais du PCB (0x24 GPA2 à GPA7) :
   il en active UN pendant DUREE_ACTIVATION_S, puis le relâche. Tu regardes ce
   qui a bougé sur la machine et tu réponds :
-      1 = BRIDAGE mère (pince)       3 = BRIDAGE fille (pince)
-      2 = COUPE mère (les 2 lames)   4 = COUPE fille (les 2 lames)
+      1 = MANDRIN mère               3 = MANDRIN fille
+      2 = COUPE mère                 4 = COUPE fille
       0 = rien n'a bougé             r = recommencer ce relais
   À la fin : les lignes EV_* à recopier dans config.py (ou à m'envoyer).
 
-  Il te demande aussi le SENS : relais activé, la pince doit se FERMER et les
-  lames DESCENDRE. Si c'est l'inverse, ce n'est pas le programme qu'il faut
+  Il te demande aussi le SENS : relais activé, le mandrin doit se FERMER et la
+  lame DESCENDRE. Si c'est l'inverse, ce n'est pas le programme qu'il faut
   changer mais le raccordement pneumatique (sorties AIR 1 / AIR 2), pour que
-  « relais à 0 » reste l'état sûr : débridé, lames hautes.
+  « relais à 0 » reste l'état sûr : mandrin ouvert, lame haute.
 
 ESSAI LIBRE (ensuite, si tu veux)
   Avec la correspondance trouvée : 1 2 3 4 = bascule, c / f = séquence de coupe
   complète mère / fille aux temporisations de config.py, 0 = tout à 0, q = quitter.
-  Sert à chronométrer : TEMPS_MANOEUVRE_BRIDAGE_S, TEMPS_COUPE_S, TEMPS_APRES_COUPE_S.
+  Sert à chronométrer : TEMPS_MANOEUVRE_MANDRIN_S, TEMPS_COUPE_S, TEMPS_APRES_COUPE_S.
 """
 
 import time
@@ -37,16 +37,16 @@ DUREE_ACTIVATION_S = 1.0
 BITS_RELAIS = range(2, 8)        # les 6 relais du PCB : 0x24 GPA2..GPA7
 
 FONCTIONS = {
-    "1": ("EV_BRIDAGE_MERE", "BRIDAGE mère", "la pince s'est-elle FERMÉE"),
-    "2": ("EV_COUPE_MERE", "COUPE mère", "les lames sont-elles DESCENDUES"),
-    "3": ("EV_BRIDAGE_FILLE", "BRIDAGE fille", "la pince s'est-elle FERMÉE"),
-    "4": ("EV_COUPE_FILLE", "COUPE fille", "les lames sont-elles DESCENDUES"),
+    "1": ("EV_MANDRIN_MERE", "MANDRIN mère", "le mandrin s'est-il FERMÉ"),
+    "2": ("EV_COUPE_MERE", "COUPE mère", "la lame est-elle DESCENDUE"),
+    "3": ("EV_MANDRIN_FILLE", "MANDRIN fille", "le mandrin s'est-il FERMÉ"),
+    "4": ("EV_COUPE_FILLE", "COUPE fille", "la lame est-elle DESCENDUE"),
 }
 
 titre("TEST 4 — RELAIS ET ÉLECTROVANNES : QUI EST QUI")
-print("  ⚠ Les vérins vont bouger, lames comprises. Mains hors des lames et des pinces.")
+print("  ⚠ Mandrins et lames vont bouger. Mains hors des lames et des mandrins.")
 print(f"  Chaque relais est activé {DUREE_ACTIVATION_S:.1f} s puis relâché.")
-print("  Réponses : 1 = bridage mère   2 = coupe mère   3 = bridage fille   4 = coupe fille")
+print("  Réponses : 1 = mandrin mère   2 = coupe mère   3 = mandrin fille   4 = coupe fille")
 print("             0 = rien n'a bougé   r = recommencer ce relais")
 
 materiel = _commun.ouvrir(avec_gpio=False)
@@ -109,9 +109,9 @@ try:
         actuel = getattr(cfg, constante)
         if constante in trouve:
             marque = "✓ comme config.py" if trouve[constante] == actuel else f"← À CORRIGER (config.py : {actuel})"
-            print(f"  │ {constante:17s} = {trouve[constante]}    # 0x24 GPA{trouve[constante]}   {marque}")
+            print(f"  │ {constante:18s} = {trouve[constante]}    # 0x24 GPA{trouve[constante]}   {marque}")
         else:
-            print(f"  │ {constante:17s} : NON TROUVÉ — {libelle} n'a réagi sur aucun relais")
+            print(f"  │ {constante:18s} : NON TROUVÉ — {libelle} n'a réagi sur aucun relais")
     for libelle in sens_faux:
         print(f"  │ ⚠ {libelle} : sens inversé → croiser AIR 1 / AIR 2 sur cette EV")
     print("  └" + "─" * 73)

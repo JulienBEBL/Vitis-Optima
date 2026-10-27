@@ -2,13 +2,14 @@
 """
 journal.py — Journal fichier avec rotation, et compteurs persistants.
 
-Origine : Clean-and-Protech V4 logger.py (fichier + console). Changements :
-RotatingFileHandler au lieu d'un fichier par lancement, niveau INFO partout
+Origine : indus V2 libs/journal.py, lui-même repris de Clean-and-Protech V4
+logger.py (fichier + console). RotatingFileHandler, niveau INFO partout
 (journal léger : démarrage, initialisation, défauts, changements d'état).
 
 Compteurs (LOGIQUE.md § 11) : un par bouton (acceptés / refusés), un par
-actionneur, un par code de défaut. Pas de compteur global. Fichier JSON unique,
-écriture atomique.
+actionneur, un par code de défaut ET par poste. Pas de compteur global.
+Fichier JSON unique, écriture atomique. Changement V3 : nouvelles clés
+(version 3) ; un fichier d'une autre version n'est pas repris.
 """
 
 from __future__ import annotations
@@ -26,9 +27,11 @@ from libs.poste import DESCRIPTION_DEFAUTS
 
 log = logging.getLogger("vitis")
 
+VERSION_COMPTEURS = 3
+
 NOMS_ACTIONNEURS = tuple(f"{organe}_{poste}"
                          for poste in cfg.POSTES
-                         for organe in ("ev_bridage", "ev_coupe", "moteur"))
+                         for organe in ("ev_mandrin", "ev_coupe", "rotations"))
 
 
 def configurer_journal() -> logging.Logger:
@@ -55,10 +58,10 @@ def configurer_journal() -> logging.Logger:
 
 def _structure_vide() -> dict:
     return {
-        "version": 1,
+        "version": VERSION_COMPTEURS,
         "boutons": {nom: {"accepte": 0, "refuse": 0} for nom in NOMS_BOUTONS},
         "actionneurs": {nom: 0 for nom in NOMS_ACTIONNEURS},
-        "defauts": {code: 0 for code in DESCRIPTION_DEFAUTS},
+        "defauts": {poste: {code: 0 for code in DESCRIPTION_DEFAUTS} for poste in cfg.POSTES},
     }
 
 
@@ -85,16 +88,21 @@ class Compteurs:
             return
         try:
             lu = json.loads(self._chemin.read_text(encoding="utf-8"))
+            if lu.get("version") != VERSION_COMPTEURS:
+                raise ValueError(f"version {lu.get('version')} au lieu de {VERSION_COMPTEURS}")
             # Fusion : la structure attendue fait foi, on reprend les valeurs
             # connues. Un compteur ajouté dans une version future part de zéro.
             for nom, valeurs in lu.get("boutons", {}).items():
                 if nom in self._donnees["boutons"]:
                     for cle in ("accepte", "refuse"):
                         self._donnees["boutons"][nom][cle] = int(valeurs.get(cle, 0))
-            for groupe in ("actionneurs", "defauts"):
-                for nom, valeur in lu.get(groupe, {}).items():
-                    if nom in self._donnees[groupe]:
-                        self._donnees[groupe][nom] = int(valeur)
+            for nom, valeur in lu.get("actionneurs", {}).items():
+                if nom in self._donnees["actionneurs"]:
+                    self._donnees["actionneurs"][nom] = int(valeur)
+            for poste, codes in lu.get("defauts", {}).items():
+                for code, valeur in codes.items():
+                    if code in self._donnees["defauts"].get(poste, {}):
+                        self._donnees["defauts"][poste][code] = int(valeur)
             log.info("Compteurs chargés (%s)", self._chemin)
         except (OSError, ValueError, TypeError, AttributeError) as erreur:
             copie = self._chemin.with_name(f"{self._chemin.name}.corrompu-{time.strftime('%Y%m%d-%H%M%S')}")
@@ -114,8 +122,8 @@ class Compteurs:
         self._donnees["actionneurs"][nom] += 1
         self._modifie = True
 
-    def defaut(self, code: str) -> None:
-        self._donnees["defauts"][code] += 1
+    def defaut(self, poste: str, code: str) -> None:
+        self._donnees["defauts"][poste][code] += 1
         self._modifie = True
 
     def sauver(self) -> None:
