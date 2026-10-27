@@ -64,6 +64,10 @@ validée avant la suivante.
 | 2026-10-27 | Retour au centre seulement sur ACQUITTEMENT. |
 | 2026-10-27 | Pas de défaut « sens inversé ». |
 | 2026-10-27 | Croisière de rotation : 10°/s. |
+| 2026-10-27 | Pas de garde après une rotation (petits coups d'ajustement). |
+| 2026-10-27 | Initialisation en deux passes de chaque côté : rapide pour trouver la butée, recul, lente pour la confirmer. |
+| 2026-10-27 | Dépassement possible à l'initialisation (plage nominale + marge) accepté. |
+| 2026-10-27 | LOGIQUE.md V3 validé (version 3.1). |
 | 2026-10-27 | ACQUITTEMENT en marche recentre les deux postes ; il rouvre d'abord le mandrin s'il est fermé ; refusé pour un poste occupé. |
 | 2026-10-27 | Un poste fait une chose à la fois (§ 4.5). |
 | 2026-10-27 | Demi-courant à l'arrêt gardé (SW4 = OFF) : pas besoin du courant plein pendant la coupe. |
@@ -133,8 +137,9 @@ Toutes tranchées le 2026-10-27 (voir § 3).
 - [x] 2026-10-27 — réponses de Julien consignées (§ 1 à 3)
 - [x] 2026-10-27 — propositions § 4 et questions § 5 validées
 - [x] 2026-10-27 — `LOGIQUE.md` réécrit pour la V3 (projet 3.0)
-- [ ] `LOGIQUE.md` validé par Julien
-- [ ] `config.py` mis à jour et validé
+- [x] 2026-10-27 — `LOGIQUE.md` validé par Julien (3.1)
+- [x] 2026-10-27 — `config.py` écrit pour la V3
+- [ ] `config.py` relu et validé par Julien
 - [ ] Code (`main.py`, `libs/`)
 - [ ] Scripts de test (`tests/`)
 - [ ] Essais machine

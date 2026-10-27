@@ -6,22 +6,28 @@ C'EST LE SEUL FICHIER À MODIFIER pour adapter le programme au câblage réel.
 Aucun numéro de broche, aucune durée, aucune adresse ne doit apparaître ailleurs
 dans le code. Tout le reste importe ce module (`import config as cfg`).
 
-La logique de pilotage est décrite dans LOGIQUE.md.
+La logique de pilotage est décrite dans LOGIQUE.md (version 3.1).
+Les écarts avec la V2 et le pourquoi sont dans CHANGEMENTS_V3.md.
 La mise en service et les tests sont décrits dans README.md.
 
 ═══════════════════════════════════════════════════════════════════════════════
  MACHINE
 ═══════════════════════════════════════════════════════════════════════════════
-Deux postes symétriques — « mère » et « fille ». Chacun possède :
-  - 1 EV de BRIDAGE, 1 bobine : bobine coupée = sortie AIR 1 = DÉBRIDÉ
-  - 1 EV de COUPE,   1 bobine : bobine coupée = sortie AIR 1 = LAME HAUTE
-  - 1 axe NEMA 34 + driver JK-DM860H, entre deux fins de course :
-    POSITION_COUPE et POSITION_LIGATURAGE
-  - 3 boutons : BRIDAGE, COUPE, POSITION (mise en position pour ligaturage)
+Deux postes « mère » et « fille », TOTALEMENT INDÉPENDANTS. Chacun possède :
+  - 1 EV de MANDRIN, 1 bobine : bobine coupée = MANDRIN OUVERT (le mandrin
+    pneumatique serre la branche : c'est le bridage)
+  - 1 EV de COUPE,   1 bobine : bobine coupée = LAME HAUTE
+  - 1 moteur NEMA 24 (StepperOnline 24IP65-30) + driver JK-DM860H qui fait
+    TOURNER le mandrin entre deux butées : HORAIRE et ANTIHORAIRE (≈ 130°)
+  - 4 boutons : BRIDAGE, ROTATION +, ROTATION −, COUPE
 Plus 1 bouton ACQUITTEMENT commun et 1 buzzer. Aucun voyant.
+Le bloc moteur se déplace à la main sur un guide de translation : aucun capteur.
 
-Bit relais à 0 = bobine coupée = état sûr. C'est le câblage qui le garantit :
-toute sortie du programme remet les relais à 0.
+⚠ Le mandrin n'a PAS de joint tournant pneumatique : son tuyau suit la
+  rotation. Sortir de la plage l'arracherait. Voir MARGE_DEPASSEMENT_DEG.
+
+Bit relais à 0 = bobine coupée = état sûr (mandrin ouvert, lame haute). Toute
+sortie du programme, et tout défaut d'un poste, remet ses relais à 0.
 
 L'arrêt d'urgence est câblé en dur et coupe tout, Raspberry Pi comprise.
 Le logiciel ne le voit pas : au réarmement, le programme repart de zéro.
@@ -32,21 +38,19 @@ Seuls les drivers 1 (poste mère) et 2 (poste fille) sont utilisés.
 ═══════════════════════════════════════════════════════════════════════════════
  VALEURS NON CONFIRMÉES — à vérifier avec les scripts de tests/ (voir README.md)
 ═══════════════════════════════════════════════════════════════════════════════
-  ⚠ À CONFIRMER   BTN_* ................ bouton physique ↔ bit          (test_2)
-                  CAP_* ................ fin de course ↔ bit            (test_3)
-                  CAPTEURS_ACTIFS_BAS .. polarité + repli au débranchement (test_3)
-                  EV_* ................. relais ↔ EV, sens de sortie    (test_4)
-                  DIR_MERE / DIR_FILLE . câblage DIR inversé du PCB     (test_5)
-                  DIR_VERS_COUPE ....... sens de rotation               (test_5)
-                  DRIVER_PAS_PAR_TOUR .. LIRE L'ÉTIQUETTE DU DRIVER (table DIP)
-  ⚠ À DÉTERMINER  MOTEUR_MAITRE, MOTEUR_COURSE_DEGRES (test_6), MOTEUR_REDUCTION
-  ⚠ À AJUSTER     vitesses et accélérations moteur, temporisations pneumatiques,
-                  RETARD_SENS_ALLER_S
+  ⚠ À ATTRIBUER   EV_* ................. relais ↔ EV                     (test_4)
+                  BTN_* ................ bouton physique ↔ bit           (test_2)
+                  CAP_* ................ butée ↔ bit, sens               (test_3)
+                  DIR_VERS_HORAIRE ..... sens de rotation par poste      (test_5)
+                  SENS_ROTATION_PLUS ... sens du bouton ROTATION +       (test_5)
+  ⚠ À CONFIRMER   DIP des drivers (6400 pas/tr, 4,28 A RMS) — LIRE L'ÉTIQUETTE
+  ⚠ À MESURER     PLAGE_NOMINALE_DEG (test_6), MARGE_DEPASSEMENT_DEG (tuyau)
+  ⚠ À AJUSTER     vitesses et rampe de rotation, vitesses d'initialisation,
+                  temporisations pneumatiques
 """
 
 from __future__ import annotations
 
-import math
 from pathlib import Path
 
 
@@ -58,47 +62,54 @@ POSTE_MERE = "mere"
 POSTE_FILLE = "fille"
 POSTES = (POSTE_MERE, POSTE_FILLE)
 
-POSITION_COUPE = "coupe"
-POSITION_LIGATURAGE = "ligaturage"
+# Sens de rotation du mandrin, vus depuis le même côté pour les deux postes
+# (⚠ convention à fixer à la mise en service et à garder : le côté opérateur).
+SENS_HORAIRE = "horaire"
+SENS_ANTIHORAIRE = "antihoraire"
+SENS = (SENS_HORAIRE, SENS_ANTIHORAIRE)
+
+
+def sens_oppose(sens: str) -> str:
+    return SENS_ANTIHORAIRE if sens == SENS_HORAIRE else SENS_HORAIRE
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  BUS I2C
+#  BUS I2C  (inchangé depuis la V2)
 # ═══════════════════════════════════════════════════════════════════════════
 
 I2C_BUS_ID = 1               # /dev/i2c-1 (100 kHz, fixé par le device tree)
 
 # Politique d'erreur (LOGIQUE.md § 9) : I2C_RETRIES nouvelles tentatives sur
-# OSError, puis défaut D6. Le délai est court parce qu'il bloque la boucle :
-# 2 × 5 ms pendant un mouvement = 6 pas de retard de lecture capteur à 600 pas/s.
+# OSError, puis défaut D6 (les DEUX postes : le bus est commun). Le délai est
+# court parce qu'il bloque la boucle.
 I2C_RETRIES = 2
 I2C_RETRY_DELAY_S = 0.005
 
 # Les registres de configuration de chaque MCP sont relus périodiquement : avec
 # deux drivers de puissance qui commutent à proximité, un MCP peut perdre sa
 # configuration et repasser ses sorties en entrée. Une relecture fausse →
-# reconfiguration + avertissement ; deux de suite → défaut D7.
+# reconfiguration + avertissement ; deux de suite → défaut D7 (les deux postes).
 RELECTURE_CONFIG_MCP_PERIODE_S = 2.0
 
 # ── Adresses des trois MCP23017 ────────────────────────────────────────────
 MCP_RELAIS_ADDR = 0x24    # port A = 6 relais (A2..A7)        | port B = 6 boutons (B0..B5)
 MCP_DRIVERS_ADDR = 0x25   # port A = DIR drivers 1..8 (A7..A0) | port B = ENA drivers 1..8 (B0..B7)
-MCP_ENTREES_ADDR = 0x26   # port A = libre | port B = ACQUITTEMENT (B0) + 4 fins de course (B1..B4)
+MCP_ENTREES_ADDR = 0x26   # port A = 2 boutons ROTATION − (A4, A5) | port B = ACQUITTEMENT (B0) + 4 butées (B1..B4)
 
 # ── Configuration attendue de chaque MCP : (port A, port B) ────────────────
 # IODIR : bit à 1 = entrée, bit à 0 = sortie. Un port = une seule direction :
 #         c'est ce qui autorise l'écriture d'octet atomique. NE PAS casser.
-# GPPU  : pull-ups internes (~100 kΩ) sur toutes les entrées, comme en V1 et V4.
+# GPPU  : pull-ups internes (~100 kΩ) sur toutes les entrées.
 MCP_RELAIS_IODIR = (0x00, 0xFF)    # A sorties, B entrées
 MCP_RELAIS_GPPU = (0x00, 0xFF)
 MCP_DRIVERS_IODIR = (0x00, 0x00)   # A et B sorties
 MCP_DRIVERS_GPPU = (0x00, 0x00)
-MCP_ENTREES_IODIR = (0xFF, 0xFF)   # A et B entrées
+MCP_ENTREES_IODIR = (0xFF, 0xFF)   # A et B entrées — le port A porte les 2 nouveaux boutons
 MCP_ENTREES_GPPU = (0xFF, 0xFF)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  GPIO / lgpio  (Raspberry Pi 5, numérotation BCM)
+#  GPIO / lgpio  (Raspberry Pi 5, numérotation BCM — inchangé depuis la V2)
 # ═══════════════════════════════════════════════════════════════════════════
 
 # Sur les noyaux récents, la puce RP1 est passée de gpiochip4 à gpiochip0. On
@@ -108,8 +119,8 @@ MCP_ENTREES_GPPU = (0xFF, 0xFF)
 GPIO_CHIP_CANDIDATS = (4, 0)
 GPIO_CHIP_LIBELLE = "rp1"          # libellé attendu : « pinctrl-rp1 »
 
-PUL_MERE = 17      # PUL driver 1 → axe mère   (confirmé PCB V4)
-PUL_FILLE = 27     # PUL driver 2 → axe fille  (confirmé PCB V4)
+PUL_MERE = 17      # PUL driver 1 → moteur mère   (confirmé PCB V4)
+PUL_FILLE = 27     # PUL driver 2 → moteur fille  (confirmé PCB V4)
 BUZZER_GPIO = 26   # buzzer passif 5 V (confirmé PCB V4)
 
 # Relais pilotés en GPIO direct, présents sur le PCB, NON utilisés. Le
@@ -121,311 +132,300 @@ GPIO_RELAIS_LIBRES = (16, 20)
 # ═══════════════════════════════════════════════════════════════════════════
 #  ÉLECTROVANNES  (sorties — MCP 0x24 port A)
 # ═══════════════════════════════════════════════════════════════════════════
-# 4 EV à 1 bobine, 1 relais chacune. Bit à 0 = bobine coupée = sortie AIR 1 =
-# état sûr (débridé / lame haute). Bit à 1 = bobine alimentée = sortie AIR 2.
+# 4 EV à 1 bobine, 1 relais chacune, sur les 4 mêmes relais qu'en V2.
+#   bit à 0 = bobine coupée     = MANDRIN OUVERT / LAME HAUTE  (état sûr)
+#   bit à 1 = bobine alimentée  = MANDRIN FERMÉ  / LAME BASSE
 #
 # ⚠ Les 6 relais du PCB sont câblés sur A2..A7 : A0 et A1 NE SORTENT NULLE PART
 #   (V4 CLAUDE.md « LED1→A2 … LED6→A7 »). verifier_config() refuse A0/A1.
-# ⚠ CORRESPONDANCE À CONFIRMER (test_4_relais.py).
+# ⚠ ATTRIBUTION À REFAIRE (test_4_relais.py). Valeurs de départ = relevé V2 du
+#   2026-10-13, l'ancien bridage devenant le mandrin.
 
-EV_COUPE_FILLE = 2     # GPA2 — relais 1   (relevé sur machine le 2026-10-13)
-EV_COUPE_MERE = 3      # GPA3 — relais 2
-EV_BRIDAGE_MERE = 4    # GPA4 — relais 3   ⚠ EV en panne au relevé (LED 0,1 s) : à revalider
-EV_BRIDAGE_FILLE = 5   # GPA5 — relais 4
+EV_COUPE_FILLE = 2       # GPA2 — relais 1   ⚠ à attribuer
+EV_COUPE_MERE = 3        # GPA3 — relais 2   ⚠ à attribuer
+EV_MANDRIN_MERE = 4      # GPA4 — relais 3   ⚠ à attribuer
+EV_MANDRIN_FILLE = 5     # GPA5 — relais 4   ⚠ à attribuer
 # GPA6 (relais 5) et GPA7 (relais 6) : libres, maintenus à 0.
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  BOUTONS  (entrées)
 # ═══════════════════════════════════════════════════════════════════════════
-# Correspondance relevée sur machine le 2026-10-08 (test_2_boutons.py).
+# 4 boutons par poste + ACQUITTEMENT = 9 entrées sur 3 ports.
+# ⚠ ATTRIBUTION À REFAIRE (test_2_boutons.py). Valeurs de départ = relevé V2 du
+#   2026-10-08, l'ancien bouton POSITION devenant ROTATION +.
 
-# MCP 0x24 port B — 6 entrées câblées (B0..B5).
-BTN_BRIDAGE_MERE = 0     # GPB0
-BTN_COUPE_MERE = 2       # GPB2
-BTN_POSITION_MERE = 1    # GPB1
-BTN_BRIDAGE_FILLE = 5    # GPB5
-BTN_COUPE_FILLE = 3      # GPB3
-BTN_POSITION_FILLE = 4   # GPB4
+# MCP 0x24 port B — 6 entrées câblées sur le PCB (B0..B5).
+BTN_BRIDAGE_MERE = 0           # GPB0
+BTN_ROTATION_PLUS_MERE = 1     # GPB1 (ancien POSITION mère)
+BTN_COUPE_MERE = 2             # GPB2
+BTN_COUPE_FILLE = 3            # GPB3
+BTN_ROTATION_PLUS_FILLE = 4    # GPB4 (ancien POSITION fille)
+BTN_BRIDAGE_FILLE = 5          # GPB5
 
-# MCP 0x26 port B — 5 entrées câblées (B0..B4). Le 0x24 n'a pas de 7e entrée.
-BTN_ACQUITTEMENT = 0     # GPB0
+# MCP 0x26 port A — les 2 nouveaux boutons (GPA4..GPA7 câblés et libres sur le PCB).
+# Lus dans la même transaction que le port B : aucune lecture I2C de plus.
+BTN_ROTATION_MOINS_MERE = 4    # GPA4
+BTN_ROTATION_MOINS_FILLE = 5   # GPA5
+
+# MCP 0x26 port B — B0..B4 câblés.
+BTN_ACQUITTEMENT = 0           # GPB0
 
 # True : bouton NO vers la masse + pull-up → appui = niveau bas.
-# Confirmé par V1, V4 et old/test_7_boutons.py.
 BOUTONS_ACTIFS_BAS = True
 
-# Anti-rebond par temps de stabilité, non bloquant (méthode V1). Un appui n'est
-# retenu qu'après ce temps de stabilité ; l'action part sur le front d'appui.
+# Anti-rebond par temps de stabilité, non bloquant. Un appui n'est retenu
+# qu'après ce temps de stabilité ; l'action part sur le front d'appui.
+# ⚠ Exception : le RELÂCHEMENT d'un bouton de rotation est pris sur la lecture
+#   BRUTE, sans anti-rebond — à 10°/s, 50 ms d'attente feraient 0,5° de trop.
 ANTI_REBOND_BOUTON_S = 0.05
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  FINS DE COURSE  (entrées — MCP 0x26 port B)
+#  BUTÉES DE ROTATION  (fins de course — entrées MCP 0x26 port B)
 # ═══════════════════════════════════════════════════════════════════════════
 # Les 4 sur le MÊME port, volontairement : un seul octet lu, donc les quatre
-# bits datent du même instant — le contrôle « deux capteurs actifs » (D2) porte
+# bits datent du même instant — le contrôle « deux butées actives » (D2) porte
 # sur une photo cohérente.
-# ⚠ CORRESPONDANCE À CONFIRMER (test_3_capteurs.py).
+# ⚠ ATTRIBUTION À REFAIRE (test_3_capteurs.py) : les capteurs ont été déplacés
+#   sur la rotation. Valeurs de départ = fils relevés en V2.
 
-# Correspondance et polarité relevées sur machine le 2026-10-08 (test_3_capteurs.py).
-CAP_MERE_COUPE = 4          # GPB4
-CAP_MERE_LIGATURAGE = 1     # GPB1
-CAP_FILLE_COUPE = 2         # GPB2
-CAP_FILLE_LIGATURAGE = 3    # GPB3
+CAP_MERE_ANTIHORAIRE = 4     # GPB4   ⚠ à attribuer (ancien « mère coupe »)
+CAP_MERE_HORAIRE = 1         # GPB1   ⚠ à attribuer (ancien « mère ligaturage »)
+CAP_FILLE_ANTIHORAIRE = 2    # GPB2   ⚠ à attribuer (ancien « fille coupe »)
+CAP_FILLE_HORAIRE = 3        # GPB3   ⚠ à attribuer (ancien « fille ligaturage »)
 
 # Contact NO + pull-up : galet actionné = contact fermé = niveau BAS.
-# Fil coupé ou connecteur débranché = niveau HAUT = « pas en position » :
-# un capteur débranché ne peut jamais provoquer un faux arrêt, le moteur
-# épuise son budget de pas et part en défaut D1.
-# Polarité confirmée sur machine le 2026-10-08. ⚠ Reste à faire : le test de
-# débranchement (test_3_capteurs.py, galet actionné, débrancher → voyant éteint).
+# Fil coupé ou connecteur débranché = niveau HAUT = « pas en butée » :
+# un capteur débranché ne provoque jamais de faux arrêt, le moteur épuise son
+# budget de pas et part en défaut D1 (ou D8 à l'initialisation).
 CAPTEURS_ACTIFS_BAS = True
 
-# Logique inverse des boutons : on ARRÊTE le moteur sur la lecture brute (pas
-# d'attente de stabilité, qui coûterait des degrés), puis on CONFIRME l'arrivée
-# par stabilité sur ANTI_REBOND_CAPTEUR_S.
+# On ARRÊTE le moteur sur la lecture brute (pas d'attente de stabilité), puis
+# on CONFIRME l'arrivée par stabilité sur ANTI_REBOND_CAPTEUR_S.
 ANTI_REBOND_CAPTEUR_S = 0.02
 
 # Nombre de lectures brutes actives CONSÉCUTIVES pour arrêter le moteur. Filtre
-# un parasite isolé (une seule lecture fausse) pour 4 ms de retard à 250 Hz,
-# soit 0,6 pas à vitesse d'approche. 1 = arrêt sur la première lecture.
+# un parasite isolé pour 4 ms de retard à 250 Hz (0,04° à 10°/s).
 CAPTEUR_LECTURES_ARRET = 2
 
-# Délai maximal entre la détection de la fin de course et sa confirmation
-# (fin de surcourse + anti-rebond). Dépassé → défaut D5.
+# Délai maximal entre la détection de la butée et sa confirmation par
+# l'anti-rebond. Dépassé → défaut D5.
 CONFIRMATION_CAPTEUR_MAX_S = 0.3
 
-# À l'arrêt en position, la fin de course peut disparaître brièvement (choc de
-# la coupe, vibration). Elle doit manquer PLUS de ce temps pour déclencher D5.
+# À l'arrêt, une butée peut battre brièvement (choc de la coupe, vibration).
+# Elle doit changer d'état PLUS de ce temps pour déclencher D5.
 TOLERANCE_PERTE_CAPTEUR_S = 0.1          # ⚠ À AJUSTER si D5 intempestifs
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  DRIVERS — DIR et ENA  (sorties — MCP 0x25)
 # ═══════════════════════════════════════════════════════════════════════════
-# Câblage du PCB Clean and Protech (V4 libs/io_board.py) :
+# Câblage du PCB Clean and Protech (V4 libs/io_board.py), inchangé :
 #   DIR driver n → port A bit (8 − n)   ← INVERSÉ
 #   ENA driver n → port B bit (n − 1)   ← direct
 
-DIR_MERE = 7     # driver 1 → GPA7   ⚠ À CONFIRMER (test_5_moteur.py)
-DIR_FILLE = 6    # driver 2 → GPA6   ⚠ À CONFIRMER (test_5_moteur.py)
+DIR_MERE = 7     # driver 1 → GPA7   (confirmé en V2)
+DIR_FILLE = 6    # driver 2 → GPA6   (confirmé en V2)
 ENA_MERE = 0     # driver 1 → GPB0
 ENA_FILLE = 1    # driver 2 → GPB1
 
 # ── Sémantique ENA sur le DM860H — PIÈGE ──────────────────────────────────
 # Le signal ENA du DM860H DÉSACTIVE le moteur quand il est actif. Étage de
-# sortie du PCB non inverseur (V4 config.py : ENA_ACTIVE_LEVEL = 0) :
+# sortie du PCB non inverseur :
 ENA_MOTEUR_EXCITE = 0    # couple de maintien
 ENA_MOTEUR_LIBRE = 1     # arbre libre
 # Avant que Python ne tourne, les broches du MCP sont en entrée et la
 # pull-down force 0 : les HUIT drivers sont excités dès la mise sous tension.
 # Le programme écrit ENA = 1 sur les huit dès l'ouverture du bus.
+#
+# Les moteurs restent EXCITÉS en permanence de la fin de l'initialisation
+# jusqu'à un défaut du poste ou l'arrêt du programme (décidé le 2026-10-27) :
+# le mandrin doit tenir son angle. Libres avant l'initialisation et en DÉFAUT.
 
-# ── Sémantique DIR — PAR AXE ──────────────────────────────────────────────
-# Les deux axes sont montés en miroir : le même niveau de DIR les fait tourner
-# en sens opposés par rapport à leurs fins de course. Relevé sur machine le
-# 2026-10-08 (test_5_moteur.py). Si un axe part du mauvais côté, inverser SA valeur.
-DIR_VERS_LIGATURAGE = {POSTE_MERE: 0, POSTE_FILLE: 1}
-DIR_VERS_COUPE = {poste: 1 - niveau for poste, niveau in DIR_VERS_LIGATURAGE.items()}
+# ── Sens — PAR POSTE ──────────────────────────────────────────────────────
+# Niveau de DIR qui fait tourner le mandrin vers sa butée HORAIRE.
+# ⚠ À CONFIRMER (test_5_moteur.py) : si un poste part du mauvais côté,
+#   inverser SA valeur. En V2 les axes étaient montés en miroir.
+DIR_VERS_HORAIRE = {POSTE_MERE: 0, POSTE_FILLE: 1}
+DIR_VERS_ANTIHORAIRE = {poste: 1 - niveau for poste, niveau in DIR_VERS_HORAIRE.items()}
 
-# Séquence avant chaque mouvement : ENA → pause → DIR → pause → impulsions.
-# Ces deux pauses sont les seules attentes bloquantes de la boucle principale.
-# Elles ne gênent pas : les deux axes ne bougent jamais en même temps.
+# Sens dans lequel le bouton ROTATION + fait tourner le mandrin, par poste.
+# ROTATION − tourne dans le sens opposé. ⚠ À CHOISIR avec l'opérateur (test_5).
+SENS_ROTATION_PLUS = {POSTE_MERE: SENS_HORAIRE, POSTE_FILLE: SENS_HORAIRE}
+
+# Le moteur étant excité en permanence, il n'y a plus de pause après ENA en
+# marche. Seule reste la pause DIR → premier pas, faite PAR LE THREAD
+# d'impulsions avant son premier pas : la boucle principale ne s'arrête jamais
+# (LOGIQUE.md § 2.1). La pause après excitation ne sert qu'à l'initialisation,
+# où elle est attendue sans bloquer la boucle.
 MOTEUR_ENA_AVANT_DIR_S = 0.010    # laisse le rotor se caler après excitation
 MOTEUR_DIR_AVANT_PAS_S = 0.005    # fiche : DIR stable avant le 1er front (mini 5 µs)
 
-# True  : les moteurs restent EXCITÉS en position (couple de maintien), de
-#         l'initialisation jusqu'à un défaut ou l'arrêt du programme.
-#         Choisi le 2026-10-13 : moteur relâché, la mère reculait de son galet
-#         dès l'arrivée (frottements, élasticité) → défaut D5 à l'arrêt.
-#         SW4 = OFF sur les drivers : le courant de maintien est divisé par deux.
-# False : ENA = 1 (moteur libre) dès l'arrivée en position.
-# Dans les deux cas : moteurs libres avant l'initialisation, en DÉFAUT et à
-# l'arrêt du programme.
-MOTEUR_MAINTIEN_EN_POSITION = True
+MOTEUR_LARGEUR_IMPULSION_US = 50  # µs — état haut de PUL. Fiche : mini 2,5 µs. Le driver
+                                  # latche sur le front DESCENDANT (étage non inverseur).
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  MOTEURS — GÉOMÉTRIE
 # ═══════════════════════════════════════════════════════════════════════════
 
-# DOIT correspondre aux interrupteurs SW5..SW8 des deux drivers (manuel
-# JK-DM860H) : 1600 pas/tr = ON/OFF/ON/ON. Toute la géométrie en dépend : avec
-# un écart, l'axe parcourt une autre course que celle calculée.
-# 1600 plutôt que 3200 : la position vient des fins de course, pas du compte de
-# pas, et à fréquence d'impulsions égale l'axe va deux fois plus vite.
-DRIVER_PAS_PAR_TOUR = 1600
+# DOIT correspondre aux interrupteurs SW5..SW8 des deux drivers (voir la section
+# DRIVERS JK-DM860H en fin de fichier). Toute la géométrie en dépend.
+# 6400 pas/tr : 0,056° par pas ; à 10°/s, 178 pas/s par moteur.
+DRIVER_PAS_PAR_TOUR = 6400
 
-MOTEUR_REDUCTION = 1.0         # ⚠ À DÉTERMINER — rapport moteur → axe (> 1 si réducteur)
-# Course COUPE ↔ LIGATURAGE de CHAQUE axe, en degrés d'axe. Relevé sur machine
-# le 2026-10-08 (test_5_moteur.py : 197–199 pas pour la mère, 531–532 pour la
-# fille, à 1600 pas/tr). ⚠ Les deux courses sont très différentes : à confirmer
-# que c'est voulu mécaniquement.
-# Relevé au rodage du 2026-10-08, après repositionnement des fins de course :
-# 197 pas (mère), 558 pas (fille). ⚠ À RE-MESURER À CHAQUE DÉPLACEMENT D'UN CAPTEUR
-# (le récapitulatif de test_7_rodage.py donne la moyenne des « pas au galet »).
-MOTEUR_COURSE_DEGRES = {POSTE_MERE: 44.3, POSTE_FILLE: 125.6}
+# Pas de réducteur : le moteur entraîne le mandrin en direct.
+PAS_PAR_DEGRE = DRIVER_PAS_PAR_TOUR / 360.0
 
-# Les nombres de pas sont CALCULÉS, jamais saisis : ajuster la course ou la
-# réduction ne demande de toucher qu'une ligne.
-PAS_PAR_DEGRE = DRIVER_PAS_PAR_TOUR * MOTEUR_REDUCTION / 360.0
-MOTEUR_COURSE_PAS = {poste: round(PAS_PAR_DEGRE * degres)
-                     for poste, degres in MOTEUR_COURSE_DEGRES.items()}
+# Plage de rotation butée ANTIHORAIRE ↔ butée HORAIRE attendue, par poste.
+# Mesurée à chaque initialisation ; la valeur mesurée est comparée à celle-ci.
+# ⚠ À MESURER (test_6_course.py) — à reprendre à chaque déplacement d'un capteur.
+PLAGE_NOMINALE_DEG = {POSTE_MERE: 130.0, POSTE_FILLE: 130.0}
+
+# Écart toléré entre plage mesurée et plage nominale. Au-delà → défaut D9.
+PLAGE_TOLERANCE_DEG = 15.0
+
+# ⚠ PROTECTION DU TUYAU DU MANDRIN. Rotation tolérée AU-DELÀ d'une butée sans
+#   la voir, avant arrêt et défaut D1 (D8 à l'initialisation). C'est une borne
+#   DURE : le thread d'impulsions s'arrête de lui-même. À l'initialisation,
+#   avant que la plage soit connue, le mandrin peut parcourir au pire
+#   PLAGE_NOMINALE_DEG + MARGE_DEPASSEMENT_DEG depuis son point de départ
+#   (accepté le 2026-10-27). ⚠ À VÉRIFIER : ce que le tuyau accepte.
+MARGE_DEPASSEMENT_DEG = 10.0
+
+# Butée de départ encore active après cette rotation → défaut D4 (le moteur ne
+# tourne pas). Doit couvrir la marge (un mandrin arrêté par D1 peut se trouver
+# jusqu'à MARGE_DEPASSEMENT_DEG derrière sa butée, galet enfoncé) et le retard
+# d'arrêt. verifier_config() le contrôle.
+DEGAGEMENT_MAX_DEG = 20.0
+
+# Au recalage sur une butée, écart entre la position comptée et la position de
+# la butée au-delà duquel le journal signale un avertissement (pas perdus ?).
+# Pas de défaut : 100 % manuel, on fait confiance à l'opérateur.
+ECART_RECALAGE_MAX_DEG = 1.0
+
+# Centrage : le poste est « au centre » à cette tolérance près (recentrage
+# inutile, seule l'ouverture du mandrin est faite).
+TOLERANCE_CENTRE_DEG = 0.5
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  MOTEURS — PROFIL DE MOUVEMENT  (LOGIQUE.md § 8)
+#  MOTEURS — VITESSES ET RAMPES  (en degrés de mandrin par seconde)
 # ═══════════════════════════════════════════════════════════════════════════
+# Communes aux deux postes : mêmes moteurs, même mécanique. Converties en pas/s
+# plus bas, jamais saisies en pas.
 #
 #  vitesse
-#     │      ┌──────────┐
-#  MAX│     ╱            ╲
-#     │    ╱              ╲
-#  APP│───╱                ╲──────────────────╳ ← fin de course (ou budget → D1)
-#     └──────────────────────────────────────── pas
-#       accél.   palier   décél.  approche lente
-#                            │←── DISTANCE_APPROCHE ──→│ course nominale
+#     │        ┌──────────────────── … tant que le bouton est tenu
+#  CRO│       ╱
+#     │      ╱  rampe en S (demi-cosinus), DUREE_RAMPE_ROTATION_S
+#  DEM│─────╱
+#     └──────────────────────────────── temps
+#                               ╳ relâchement / butée → arrêt au pas suivant
 #
-# Le moteur démarre à la vitesse d'approche (un pas-à-pas ne démarre pas de 0),
-# accélère, tient la vitesse max, décélère pour atteindre la vitesse d'approche
-# MOTEUR_DISTANCE_APPROCHE_DEG avant la position nominale, puis avance lentement
-# jusqu'à la fin de course. La phase lente n'a pas de longueur fixe : seul le
-# budget de pas la borne.
-#
-# La vitesse réelle est légèrement INFÉRIEURE à la consigne (quelques %) : le
-# thread compte chaque période depuis le pas réellement émis, un retard ralentit
-# le moteur mais ne provoque jamais de rafale d'impulsions.
+# Pas de rampe d'arrêt sur une rotation : à ces vitesses un pas-à-pas s'arrête
+# net sans perdre de pas, et l'arrêt doit être immédiat (précision).
 
-# ⚠ À AJUSTER SUR MACHINE — PAR AXE. Les deux axes n'ont ni la même course ni
-# les mêmes frottements : chacun a sa vitesse et ses rampes.
-# 2026-10-08 : accélérations ramenées de 3000 à 1500 pas/s² après un décrochage
-# de la mère au 727e trajet de rodage (course courte, frottements). Puis mère
-# adoucie à part (800 pas/s², 400 pas/s) : jugée trop vive à l'œil pendant le rodage.
-MOTEUR_VITESSE_MAX_SPS = {POSTE_MERE: 400.0, POSTE_FILLE: 600.0}     # pas/s — palier
-MOTEUR_ACCEL_SPS2 = {POSTE_MERE: 800.0, POSTE_FILLE: 1500.0}       # pas/s² — rampe de montée
-MOTEUR_DECEL_SPS2 = {POSTE_MERE: 800.0, POSTE_FILLE: 1500.0}       # pas/s² — rampe de descente
+# ── Rotation au maintien (boutons ROTATION + / −) ──────────────────────────
+VITESSE_CROISIERE_DEG_S = 10.0      # ⚠ À AJUSTER — demandé le 2026-10-27
+VITESSE_DEMARRAGE_DEG_S = 1.0       # ⚠ À AJUSTER — vitesse du premier pas
+DUREE_RAMPE_ROTATION_S = 1.0        # ⚠ À AJUSTER — montée douce et longue, DEMARRAGE → CROISIERE
 
-# Commune aux deux axes : vitesse de démarrage, d'approche finale sur le galet,
-# de recherche à l'initialisation.
-MOTEUR_VITESSE_APPROCHE_SPS = 150.0     # pas/s
-
-# True  : rampes « en S » — la vitesse suit une courbe douce (demi-cosinus),
-#         sans cassure à l'entrée ni à la sortie de la rampe. Moins d'à-coups,
-#         donc moins de vibrations. MOTEUR_ACCEL_SPS2 / DECEL sont alors
-#         l'accélération de POINTE, atteinte au milieu de la rampe.
-# False : rampes droites (accélération constante, cassures aux deux bouts).
+# True  : rampes « en S » (demi-cosinus), pente nulle aux deux bouts : moins
+#         d'à-coups, moins de vibrations (choix de la V2, gardé).
+# False : rampes droites.
 MOTEUR_RAMPES_EN_S = True
 
-MOTEUR_DISTANCE_APPROCHE_DEG = 5.0      # degrés d'axe parcourus à vitesse lente avant la position nominale
-MOTEUR_MARGE_DEG = 10.0                 # degrés tolérés AU-DELÀ de la course nominale avant défaut D1
-MOTEUR_SURCOURSE_DEG = 1.0              # degrés parcourus APRÈS la fin de course, pour s'asseoir franchement
-                                        # sur le galet (0 = arrêt immédiat). Sans cela, le rotor qui se
-                                        # recale à la coupure de ENA peut suffire à relâcher le galet.
-MOTEUR_DEGAGEMENT_MAX_DEG = 20.0        # fin de course de départ encore active au-delà → défaut D4
-                                        # (le moteur ne tourne pas). Doit couvrir : la marge (un axe arrêté
-                                        # par un défaut D1 peut se trouver jusqu'à MOTEUR_MARGE_DEG au-delà
-                                        # de sa fin de course, galet enfoncé), la surcourse, et le retard de
-                                        # l'anti-rebond. verifier_config() le contrôle.
+# ── Initialisation : deux passes de chaque côté (LOGIQUE.md § 3.1) ─────────
+# Passe RAPIDE : trouve la butée grossièrement (rampe de démarrage, pas de
+# rampe d'arrêt). Puis RECUL, puis passe LENTE de confirmation, qui fixe la
+# position de la butée.
+VITESSE_RECHERCHE_RAPIDE_DEG_S = 20.0   # ⚠ À AJUSTER — les deux moteurs ensemble = 711 pas/s,
+                                        # au-dessus des 600 pas/s tenus par un thread en V2 :
+                                        # surveiller le « retard max » du journal aux essais
+VITESSE_RECHERCHE_LENTE_DEG_S = 3.0     # ⚠ À AJUSTER — arrêt en moins de 0,03° sur la butée
+RECUL_CONFIRMATION_DEG = 5.0            # recul après la passe rapide : doit relâcher le galet
+TOLERANCE_CONFIRMATION_DEG = 3.0        # la passe lente doit retrouver la butée dans
+                                        # RECUL + cette tolérance, sinon défaut D8
 
-MOTEUR_LARGEUR_IMPULSION_US = 50        # µs — état haut de PUL. Fiche : mini 2,5 µs. Le driver
-                                        # latche sur le front DESCENDANT (étage non inverseur).
+# ── Mouvement vers une position (centrage, recentrage sur ACQUITTEMENT) ────
+# Rampe en S de montée et de descente, chacune de DUREE_RAMPE_ROTATION_S
+# (raccourcies si le trajet est court), arrêt sur le compte de pas.
+VITESSE_RECENTRAGE_DEG_S = 10.0         # ⚠ À AJUSTER
 
-# Calculés — ne pas modifier.
-MOTEUR_APPROCHE_PAS = round(PAS_PAR_DEGRE * MOTEUR_DISTANCE_APPROCHE_DEG)
-MOTEUR_MARGE_PAS = round(PAS_PAR_DEGRE * MOTEUR_MARGE_DEG)
-MOTEUR_SURCOURSE_PAS = round(PAS_PAR_DEGRE * MOTEUR_SURCOURSE_DEG)
-MOTEUR_DEGAGEMENT_MAX_PAS = round(PAS_PAR_DEGRE * MOTEUR_DEGAGEMENT_MAX_DEG)
-# En S, la rampe est π/2 fois plus longue : c'est ce qui garde la même
-# accélération de POINTE que la rampe droite.
-_ALLONGEMENT_RAMPE = math.pi / 2 if MOTEUR_RAMPES_EN_S else 1.0
+# Sens de la première butée recherchée à l'initialisation.
+INIT_PREMIER_SENS = SENS_ANTIHORAIRE
 
-
-def _profil_axe(poste: str) -> tuple:
-    """(fin de décélération, pas d'accélération, pas de décélération, vitesse de pointe).
-
-    Sur une course trop courte pour atteindre MOTEUR_VITESSE_MAX_SPS, les deux
-    rampes sont raccourcies dans la même proportion et la vitesse de pointe
-    baisse d'autant : les accélérations restent celles demandées, l'axe ne
-    fait simplement pas de palier.
-    """
-    pointe = MOTEUR_VITESSE_MAX_SPS[poste]
-    ecart_carres = pointe ** 2 - MOTEUR_VITESSE_APPROCHE_SPS ** 2
-    accel = math.ceil(ecart_carres / (2 * MOTEUR_ACCEL_SPS2[poste]) * _ALLONGEMENT_RAMPE)
-    decel = math.ceil(ecart_carres / (2 * MOTEUR_DECEL_SPS2[poste]) * _ALLONGEMENT_RAMPE)
-    fin_decel = MOTEUR_COURSE_PAS[poste] - MOTEUR_APPROCHE_PAS
-    if 0 < fin_decel < accel + decel:
-        part = fin_decel / (accel + decel)
-        accel = int(accel * part)
-        decel = fin_decel - accel
-        pointe = math.sqrt(MOTEUR_VITESSE_APPROCHE_SPS ** 2 + ecart_carres * part)
-    return fin_decel, accel, decel, pointe
+# ── Calculés — ne pas modifier ────────────────────────────────────────────
+def _pas(degres: float) -> int:
+    return round(PAS_PAR_DEGRE * degres)
 
 
-# Par axe : poste → valeur.
-_PROFILS = {poste: _profil_axe(poste) for poste in POSTES}
-MOTEUR_FIN_DECEL_PAS = {poste: profil[0] for poste, profil in _PROFILS.items()}
-MOTEUR_ACCEL_PAS = {poste: profil[1] for poste, profil in _PROFILS.items()}
-MOTEUR_DECEL_PAS = {poste: profil[2] for poste, profil in _PROFILS.items()}
-MOTEUR_VITESSE_POINTE_SPS = {poste: profil[3] for poste, profil in _PROFILS.items()}
+VITESSE_CROISIERE_SPS = VITESSE_CROISIERE_DEG_S * PAS_PAR_DEGRE
+VITESSE_DEMARRAGE_SPS = VITESSE_DEMARRAGE_DEG_S * PAS_PAR_DEGRE
+VITESSE_RECHERCHE_RAPIDE_SPS = VITESSE_RECHERCHE_RAPIDE_DEG_S * PAS_PAR_DEGRE
+VITESSE_RECHERCHE_LENTE_SPS = VITESSE_RECHERCHE_LENTE_DEG_S * PAS_PAR_DEGRE
+VITESSE_RECENTRAGE_SPS = VITESSE_RECENTRAGE_DEG_S * PAS_PAR_DEGRE
+VITESSE_MAX_SPS = max(VITESSE_CROISIERE_SPS, VITESSE_RECHERCHE_RAPIDE_SPS, VITESSE_RECENTRAGE_SPS)
 
-# BUDGET DE PAS — borne DURE de chaque mouvement, référencement compris. Le
-# thread d'impulsions s'arrête de lui-même au dernier pas autorisé. Il est
-# compté depuis le relâchement du galet de départ (depuis le premier pas en
-# recherche lente) : la cible peut donc être dépassée d'au plus MOTEUR_MARGE_DEG,
-# où que l'axe ait démarré derrière son galet. Avant ce relâchement, c'est
-# MOTEUR_DEGAGEMENT_MAX_DEG (défaut D4) qui borne le mouvement.
-MOTEUR_BUDGET_PAS = {poste: pas + MOTEUR_MARGE_PAS for poste, pas in MOTEUR_COURSE_PAS.items()}
+PLAGE_NOMINALE_PAS = {poste: _pas(degres) for poste, degres in PLAGE_NOMINALE_DEG.items()}
+PLAGE_TOLERANCE_PAS = _pas(PLAGE_TOLERANCE_DEG)
+MARGE_DEPASSEMENT_PAS = _pas(MARGE_DEPASSEMENT_DEG)
+DEGAGEMENT_MAX_PAS = _pas(DEGAGEMENT_MAX_DEG)
+ECART_RECALAGE_MAX_PAS = _pas(ECART_RECALAGE_MAX_DEG)
+TOLERANCE_CENTRE_PAS = _pas(TOLERANCE_CENTRE_DEG)
+RECUL_CONFIRMATION_PAS = _pas(RECUL_CONFIRMATION_DEG)
 
-
-# ═══════════════════════════════════════════════════════════════════════════
-#  MOTEURS — ORDRE ENTRE LES DEUX POSTES  (LOGIQUE.md § 5, I7 et I8)
-# ═══════════════════════════════════════════════════════════════════════════
-# ALLER (COUPE → LIGATURAGE) : le maître d'abord. L'appui POSITION de l'esclave
-#   est REFUSÉ tant que le maître n'est pas arrivé en ligaturage depuis au
-#   moins RETARD_SENS_ALLER_S. Rien n'est mémorisé.
-# RETOUR (LIGATURAGE → COUPE) : l'esclave d'abord. L'appui POSITION du maître
-#   est REFUSÉ tant que l'esclave n'est pas revenu en position coupe.
-# INITIALISATION : l'esclave est référencé en premier, puis le maître.
-
-MOTEUR_MAITRE = POSTE_FILLE    # confirmé par Julien le 2026-10-14 : la fille part en ligaturage la première
-RETARD_SENS_ALLER_S = 0.5      # ⚠ À AJUSTER — s, délai APRÈS l'arrivée du maître avant d'accepter l'esclave
+# BUDGETS DE PAS — bornes DURES, le thread s'arrête de lui-même au dernier pas.
+# Passe rapide : la plage n'est pas encore connue, le mandrin peut être n'importe où.
+BUDGET_RECHERCHE_RAPIDE_PAS = {poste: pas + MARGE_DEPASSEMENT_PAS
+                               for poste, pas in PLAGE_NOMINALE_PAS.items()}
+# Passe lente : la butée est juste derrière le recul.
+BUDGET_CONFIRMATION_PAS = RECUL_CONFIRMATION_PAS + _pas(TOLERANCE_CONFIRMATION_DEG)
+# En marche, le budget d'une rotation est calculé au départ depuis la position
+# (LOGIQUE.md § 6.1) : vers HORAIRE plage + marge − position, vers ANTIHORAIRE
+# position + marge.
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  TEMPORISATIONS DES ACTIONS  (secondes)
 # ═══════════════════════════════════════════════════════════════════════════
-# Règle universelle (LOGIQUE.md § 2.2) : toute action a une durée. Pendant
-# cette durée le poste est occupé et ses trois boutons sont refusés. L'état de
-# l'actionneur ne change qu'à la FIN de l'action : la variable ne peut jamais
-# être en avance sur le vérin.
+# Règle universelle (LOGIQUE.md § 2) : toute action a une durée. Pendant cette
+# durée le poste est occupé et ses boutons sont refusés. L'état de
+# l'actionneur ne change qu'à la FIN de l'action.
 
-# Séquence de coupe : attente → impulsion EV → attente → fin (double bip).
+# Séquence de coupe (inchangée depuis la V2) : attente → impulsion EV → attente → fin.
 TEMPS_AVANT_COUPE_S = 0.2      # ⚠ À AJUSTER — laisse l'opérateur dégager la main après l'appui
-TEMPS_COUPE_S = 0.75           # ⚠ À AJUSTER — EV coupe alimentée (valeur V1, dernier réglage)
+TEMPS_COUPE_S = 0.75           # ⚠ À AJUSTER — EV coupe alimentée (valeur V2)
 TEMPS_APRES_COUPE_S = 0.5      # ⚠ À AJUSTER — garantit la lame remontée avant tout nouvel appui
 
-# Bridage : l'EV bascule immédiatement, l'état « bridé / débridé » n'est retenu
-# qu'après ce temps. Doit couvrir la course complète du vérin.
-TEMPS_MANOEUVRE_BRIDAGE_S = 0.5   # ⚠ À AJUSTER — chronométrer la course du vérin (test_4)
+# Mandrin : l'EV bascule immédiatement, l'état « ouvert / fermé » n'est retenu
+# qu'après ce temps. Doit couvrir la course complète des mors. Aussi attendu à
+# l'initialisation et au recentrage avant toute rotation, si le mandrin était fermé.
+TEMPS_MANOEUVRE_MANDRIN_S = 0.5   # ⚠ À AJUSTER — chronométrer (test_4)
 
-# Après CHAQUE action (bridage, coupe, mise en position), les boutons du poste
-# restent refusés ce temps-là. Protège contre le double appui.
+# Après une coupe ou une manœuvre du mandrin, les boutons du poste restent
+# refusés ce temps-là. Protège contre le double appui.
 TEMPS_GARDE_APRES_ACTION_S = 0.3
+
+# Après une rotation : pas de garde (décidé le 2026-10-27), pour que l'opérateur
+# puisse ajuster par petits coups. Un nouveau front d'appui stable reste exigé.
+TEMPS_GARDE_APRES_ROTATION_S = 0.0
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  BOUCLE PRINCIPALE
 # ═══════════════════════════════════════════════════════════════════════════
-# 250 Hz : latence de décision 4 ms, soit ~2,4 pas à 600 pas/s et 0,6 pas à
-# vitesse d'approche. Coût I2C ≈ 600 transactions/s, ~25 % du bus.
+# 250 Hz : latence de décision 4 ms. Coût I2C ≈ 2 lectures + au plus 2
+# écritures par tour, ~25 % du bus. Aucune attente bloquante dans la boucle.
 
 FREQUENCE_BOUCLE_HZ = 250
 PERIODE_BOUCLE_S = 1.0 / FREQUENCE_BOUCLE_HZ
 
 # Intervalle de bascule du GIL entre threads Python (défaut 5 ms). Réduit pour
-# que le thread d'impulsions récupère la main vite quand son pas arrive à
-# échéance, même si la boucle principale est en train de calculer.
+# que les threads d'impulsions récupèrent la main vite quand leur pas arrive à
+# échéance. Plus important encore en V3 : deux threads tournent ensemble.
 PYTHON_SWITCH_INTERVAL_S = 0.0005
 
 # Attente maximale de la fin d'un thread d'impulsions après un ordre d'arrêt
@@ -436,13 +436,13 @@ ARRET_THREAD_MAX_S = 0.2
 # ═══════════════════════════════════════════════════════════════════════════
 #  BUZZER  (GPIO 26, PWM lgpio)
 # ═══════════════════════════════════════════════════════════════════════════
-# Non bloquant. Une panne de buzzer ne bloque jamais la machine : il se
-# désactive et le journal le signale.
-#   appui accepté ........... 1 bip court
-#   fin d'action ............ 2 bips courts (coupe, bridage, mise en position)
-#   machine prête ........... 2 bips courts
-#   appui refusé ............ 1 bip LONG — distinct du double bip de fin d'action
-#   entrée en défaut ........ 1 bip très long
+# Non bloquant. Une panne de buzzer ne bloque jamais la machine.
+#   appui accepté (BRIDAGE, COUPE, ACQUITTEMENT) . 1 bip court
+#   appui ROTATION accepté ....................... AUCUN bip
+#   arrivée sur une butée en rotation ............ 1 bip court
+#   fin d'action, poste initialisé ............... 2 bips courts
+#   appui refusé ................................. 1 bip LONG
+#   entrée en défaut ............................. 1 bip très long
 
 BUZZER_ACTIF = True
 BUZZER_FREQ_HZ = 2000           # résonance nominale du buzzer passif
@@ -464,9 +464,9 @@ CHEMIN_JOURNAL = _RACINE / "logs" / "vitis_optima.log"
 JOURNAL_TAILLE_MAX_OCTETS = 1_000_000   # rotation à 1 Mo
 JOURNAL_NB_ARCHIVES = 5                 # vitis_optima.log.1 … .5
 
-# Un compteur par bouton (acceptés / refusés) et par actionneur, pas de global.
-# Écriture atomique (fichier temporaire + os.replace). Jamais pendant un
-# mouvement : une écriture sur carte SD peut bloquer la boucle 100 ms.
+# Un compteur par bouton (acceptés / refusés), par actionneur et par défaut et
+# par poste. Écriture atomique (fichier temporaire + os.replace). Jamais pendant
+# un mouvement : une écriture sur carte SD peut bloquer la boucle 100 ms.
 CHEMIN_COMPTEURS = _RACINE / "etat" / "compteurs.json"
 COMPTEURS_PERIODE_ECRITURE_S = 30.0
 
@@ -474,25 +474,21 @@ COMPTEURS_PERIODE_ECRITURE_S = 30.0
 # ═══════════════════════════════════════════════════════════════════════════
 #  DRIVERS JK-DM860H — RÉGLAGES PHYSIQUES  (documentation, aucune dépendance code)
 # ═══════════════════════════════════════════════════════════════════════════
-# Réglage des DEUX drivers, SW1 → SW8 (1 = ON), d'après le manuel JK-DM860H :
-#   SW1=ON  SW2=OFF SW3=OFF        → 5,43 A RMS / 6,52 A crête (monté le 2026-10-08
-#                                    après décrochages de la mère ; surveiller la chauffe)
-#   SW4=OFF                        → demi-courant à l'arrêt
-#   SW5=ON  SW6=OFF SW7=ON SW8=ON  → 1600 impulsions/tour (= DRIVER_PAS_PAR_TOUR)
-DRIVER_DIP_SWITCH = "10001011"
-
-# ⚠ À CONFIRMER : courant nominal sur la plaque du moteur (noté 6,0 A / phase).
-#   Crans SW1/SW2/SW3 du manuel :
-#     OFF/OFF/ON  → 3,71 A RMS / 4,45 A crête  (si ça chauffe et que le couple suffit)
-#     ON/ON/OFF   → 4,28 A RMS / 5,14 A crête  (réglage de départ, ~70 % de 6 A)
-#     ON/OFF/OFF  → 5,43 A RMS / 6,52 A crête  (valeur actuelle)
-#     OFF/ON/OFF  → 4,86 A RMS / 5,83 A crête  (si l'axe décroche)
-#     OFF/OFF/OFF → 6,00 A RMS / 7,20 A crête  (maximum, moteur de 6 A seulement)
-DRIVER_COURANT_CRETE_A = 6.52
+# Moteurs : StepperOnline 24IP65-30 — NEMA 24, 3,0 N·m, 5,0 A / phase, IP65.
+# Réglage proposé des DEUX drivers, SW1 → SW8 (1 = ON) :
+#   SW1=ON  SW2=ON  SW3=OFF        → 4,28 A RMS / 5,14 A crête (~85 % de 5,0 A ;
+#                                    monter à OFF/ON/OFF = 4,86 A RMS si décrochage)
+#   SW4=OFF                        → demi-courant à l'arrêt (gardé le 2026-10-27 :
+#                                    le mandrin n'a pas besoin du plein couple en coupe)
+#   SW5=ON  SW6=ON  SW7=OFF SW8=ON → 6400 impulsions/tour (= DRIVER_PAS_PAR_TOUR)
+# ⚠ À CONFIRMER SUR L'ÉTIQUETTE DU DRIVER avant le premier mouvement
+#   (en V2 : 1600 pas/tr = ON/OFF/ON/ON, cohérent avec cette table).
+DRIVER_DIP_SWITCH = "11001101"
+DRIVER_COURANT_CRETE_A = 5.14
 
 # Ce driver n'a PAS de sortie d'alarme : une panne n'est signalée que par sa
 # LED rouge. Les seuls détecteurs logiciels sont D4 (le moteur ne quitte pas sa
-# fin de course de départ) et D1 (budget de pas épuisé).
+# butée de départ) et D1 / D8 (budget de pas épuisé).
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -519,27 +515,37 @@ def verifier_config() -> None:
             erreurs.append(f"{libelle} : deux fonctions sur le même bit — "
                            + ", ".join(f"{n}={b}" for n, b in groupe.items()))
 
+    def _par_poste(nom: str, table: dict) -> None:
+        if set(table) != set(POSTES):
+            erreurs.append(f"{nom} : une valeur par poste attendue ({POSTES}), trouvé {sorted(table)}")
+
     # ── Bits : uniquement ceux qui sont réellement câblés sur le PCB
-    ev = {"EV_BRIDAGE_MERE": EV_BRIDAGE_MERE, "EV_COUPE_MERE": EV_COUPE_MERE,
-          "EV_BRIDAGE_FILLE": EV_BRIDAGE_FILLE, "EV_COUPE_FILLE": EV_COUPE_FILLE}
+    ev = {"EV_MANDRIN_MERE": EV_MANDRIN_MERE, "EV_COUPE_MERE": EV_COUPE_MERE,
+          "EV_MANDRIN_FILLE": EV_MANDRIN_FILLE, "EV_COUPE_FILLE": EV_COUPE_FILLE}
     for nom, bit in ev.items():
         _dans(nom, bit, set(range(2, 8)))          # relais sur A2..A7 seulement
     _distincts("EV (0x24 A)", ev)
 
-    btn = {"BTN_BRIDAGE_MERE": BTN_BRIDAGE_MERE, "BTN_COUPE_MERE": BTN_COUPE_MERE,
-           "BTN_POSITION_MERE": BTN_POSITION_MERE, "BTN_BRIDAGE_FILLE": BTN_BRIDAGE_FILLE,
-           "BTN_COUPE_FILLE": BTN_COUPE_FILLE, "BTN_POSITION_FILLE": BTN_POSITION_FILLE}
-    for nom, bit in btn.items():
+    btn_24 = {"BTN_BRIDAGE_MERE": BTN_BRIDAGE_MERE, "BTN_ROTATION_PLUS_MERE": BTN_ROTATION_PLUS_MERE,
+              "BTN_COUPE_MERE": BTN_COUPE_MERE, "BTN_BRIDAGE_FILLE": BTN_BRIDAGE_FILLE,
+              "BTN_ROTATION_PLUS_FILLE": BTN_ROTATION_PLUS_FILLE, "BTN_COUPE_FILLE": BTN_COUPE_FILLE}
+    for nom, bit in btn_24.items():
         _dans(nom, bit, set(range(0, 6)))          # entrées câblées B0..B5
-    _distincts("boutons (0x24 B)", btn)
-    _dans("BTN_ACQUITTEMENT", BTN_ACQUITTEMENT, set(range(0, 5)))   # 0x26 B0..B4
+    _distincts("boutons (0x24 B)", btn_24)
 
-    cap = {"CAP_MERE_COUPE": CAP_MERE_COUPE, "CAP_MERE_LIGATURAGE": CAP_MERE_LIGATURAGE,
-           "CAP_FILLE_COUPE": CAP_FILLE_COUPE, "CAP_FILLE_LIGATURAGE": CAP_FILLE_LIGATURAGE}
+    btn_26a = {"BTN_ROTATION_MOINS_MERE": BTN_ROTATION_MOINS_MERE,
+               "BTN_ROTATION_MOINS_FILLE": BTN_ROTATION_MOINS_FILLE}
+    for nom, bit in btn_26a.items():
+        _dans(nom, bit, set(range(4, 8)))          # entrées câblées A4..A7
+    _distincts("boutons (0x26 A)", btn_26a)
+
+    cap = {"CAP_MERE_HORAIRE": CAP_MERE_HORAIRE, "CAP_MERE_ANTIHORAIRE": CAP_MERE_ANTIHORAIRE,
+           "CAP_FILLE_HORAIRE": CAP_FILLE_HORAIRE, "CAP_FILLE_ANTIHORAIRE": CAP_FILLE_ANTIHORAIRE}
     for nom, bit in cap.items():
         _dans(nom, bit, set(range(0, 5)))          # entrées câblées B0..B4
+    _dans("BTN_ACQUITTEMENT", BTN_ACQUITTEMENT, set(range(0, 5)))
     # Même port que ACQUITTEMENT : aucun bit en double entre les cinq.
-    _distincts("fins de course + acquittement (0x26 B)", {**cap, "BTN_ACQUITTEMENT": BTN_ACQUITTEMENT})
+    _distincts("butées + acquittement (0x26 B)", {**cap, "BTN_ACQUITTEMENT": BTN_ACQUITTEMENT})
 
     for nom, bit in (("DIR_MERE", DIR_MERE), ("DIR_FILLE", DIR_FILLE),
                      ("ENA_MERE", ENA_MERE), ("ENA_FILLE", ENA_FILLE)):
@@ -547,20 +553,20 @@ def verifier_config() -> None:
     _distincts("DIR (0x25 A)", {"DIR_MERE": DIR_MERE, "DIR_FILLE": DIR_FILLE})
     _distincts("ENA (0x25 B)", {"ENA_MERE": ENA_MERE, "ENA_FILLE": ENA_FILLE})
 
-    # ── Niveaux logiques
+    # ── Niveaux logiques et sens
     for nom, val in (("ENA_MOTEUR_EXCITE", ENA_MOTEUR_EXCITE), ("ENA_MOTEUR_LIBRE", ENA_MOTEUR_LIBRE)):
         _dans(nom, val, {0, 1})
     if ENA_MOTEUR_EXCITE == ENA_MOTEUR_LIBRE:
         erreurs.append("ENA_MOTEUR_EXCITE et ENA_MOTEUR_LIBRE identiques")
-    for nom, table in (("DIR_VERS_LIGATURAGE", DIR_VERS_LIGATURAGE),
-                       ("MOTEUR_COURSE_DEGRES", MOTEUR_COURSE_DEGRES),
-                       ("MOTEUR_VITESSE_MAX_SPS", MOTEUR_VITESSE_MAX_SPS),
-                       ("MOTEUR_ACCEL_SPS2", MOTEUR_ACCEL_SPS2),
-                       ("MOTEUR_DECEL_SPS2", MOTEUR_DECEL_SPS2)):
-        if set(table) != set(POSTES):
-            erreurs.append(f"{nom} : une valeur par poste attendue ({POSTES}), trouvé {sorted(table)}")
-    for poste, niveau in DIR_VERS_LIGATURAGE.items():
-        _dans(f"DIR_VERS_LIGATURAGE[{poste}]", niveau, {0, 1})
+    for nom, table in (("DIR_VERS_HORAIRE", DIR_VERS_HORAIRE),
+                       ("SENS_ROTATION_PLUS", SENS_ROTATION_PLUS),
+                       ("PLAGE_NOMINALE_DEG", PLAGE_NOMINALE_DEG)):
+        _par_poste(nom, table)
+    for poste, niveau in DIR_VERS_HORAIRE.items():
+        _dans(f"DIR_VERS_HORAIRE[{poste}]", niveau, {0, 1})
+    for poste, sens in SENS_ROTATION_PLUS.items():
+        _dans(f"SENS_ROTATION_PLUS[{poste}]", sens, set(SENS))
+    _dans("INIT_PREMIER_SENS", INIT_PREMIER_SENS, set(SENS))
 
     # ── GPIO : aucune broche en double
     gpio = [PUL_MERE, PUL_FILLE, BUZZER_GPIO, *GPIO_RELAIS_LIBRES]
@@ -570,9 +576,6 @@ def verifier_config() -> None:
     # ── Adresses MCP distinctes
     if len({MCP_RELAIS_ADDR, MCP_DRIVERS_ADDR, MCP_ENTREES_ADDR}) != 3:
         erreurs.append("MCP_RELAIS_ADDR / MCP_DRIVERS_ADDR / MCP_ENTREES_ADDR : trois adresses distinctes attendues")
-
-    # ── Poste maître
-    _dans("MOTEUR_MAITRE", MOTEUR_MAITRE, set(POSTES))
 
     # ── Durées et grandeurs strictement positives
     for nom, val in (
@@ -584,18 +587,25 @@ def verifier_config() -> None:
         ("CONFIRMATION_CAPTEUR_MAX_S", CONFIRMATION_CAPTEUR_MAX_S),
         ("TOLERANCE_PERTE_CAPTEUR_S", TOLERANCE_PERTE_CAPTEUR_S),
         ("DRIVER_PAS_PAR_TOUR", DRIVER_PAS_PAR_TOUR),
-        ("MOTEUR_REDUCTION", MOTEUR_REDUCTION),
-        *((f"MOTEUR_COURSE_DEGRES[{poste}]", degres) for poste, degres in MOTEUR_COURSE_DEGRES.items()),
-        *((f"MOTEUR_VITESSE_MAX_SPS[{poste}]", v) for poste, v in MOTEUR_VITESSE_MAX_SPS.items()),
-        ("MOTEUR_VITESSE_APPROCHE_SPS", MOTEUR_VITESSE_APPROCHE_SPS),
-        *((f"MOTEUR_ACCEL_SPS2[{poste}]", v) for poste, v in MOTEUR_ACCEL_SPS2.items()),
-        *((f"MOTEUR_DECEL_SPS2[{poste}]", v) for poste, v in MOTEUR_DECEL_SPS2.items()),
-        ("MOTEUR_DISTANCE_APPROCHE_DEG", MOTEUR_DISTANCE_APPROCHE_DEG),
-        ("MOTEUR_MARGE_DEG", MOTEUR_MARGE_DEG),
-        ("MOTEUR_DEGAGEMENT_MAX_DEG", MOTEUR_DEGAGEMENT_MAX_DEG),
+        *((f"PLAGE_NOMINALE_DEG[{poste}]", degres) for poste, degres in PLAGE_NOMINALE_DEG.items()),
+        ("PLAGE_TOLERANCE_DEG", PLAGE_TOLERANCE_DEG),
+        ("MARGE_DEPASSEMENT_DEG", MARGE_DEPASSEMENT_DEG),
+        ("DEGAGEMENT_MAX_DEG", DEGAGEMENT_MAX_DEG),
+        ("ECART_RECALAGE_MAX_DEG", ECART_RECALAGE_MAX_DEG),
+        ("TOLERANCE_CENTRE_DEG", TOLERANCE_CENTRE_DEG),
+        ("VITESSE_CROISIERE_DEG_S", VITESSE_CROISIERE_DEG_S),
+        ("VITESSE_DEMARRAGE_DEG_S", VITESSE_DEMARRAGE_DEG_S),
+        ("DUREE_RAMPE_ROTATION_S", DUREE_RAMPE_ROTATION_S),
+        ("VITESSE_RECHERCHE_RAPIDE_DEG_S", VITESSE_RECHERCHE_RAPIDE_DEG_S),
+        ("VITESSE_RECHERCHE_LENTE_DEG_S", VITESSE_RECHERCHE_LENTE_DEG_S),
+        ("RECUL_CONFIRMATION_DEG", RECUL_CONFIRMATION_DEG),
+        ("TOLERANCE_CONFIRMATION_DEG", TOLERANCE_CONFIRMATION_DEG),
+        ("VITESSE_RECENTRAGE_DEG_S", VITESSE_RECENTRAGE_DEG_S),
         ("MOTEUR_LARGEUR_IMPULSION_US", MOTEUR_LARGEUR_IMPULSION_US),
+        ("MOTEUR_ENA_AVANT_DIR_S", MOTEUR_ENA_AVANT_DIR_S),
+        ("MOTEUR_DIR_AVANT_PAS_S", MOTEUR_DIR_AVANT_PAS_S),
         ("TEMPS_COUPE_S", TEMPS_COUPE_S),
-        ("TEMPS_MANOEUVRE_BRIDAGE_S", TEMPS_MANOEUVRE_BRIDAGE_S),
+        ("TEMPS_MANOEUVRE_MANDRIN_S", TEMPS_MANOEUVRE_MANDRIN_S),
         ("FREQUENCE_BOUCLE_HZ", FREQUENCE_BOUCLE_HZ),
         ("PYTHON_SWITCH_INTERVAL_S", PYTHON_SWITCH_INTERVAL_S),
         ("ARRET_THREAD_MAX_S", ARRET_THREAD_MAX_S),
@@ -603,11 +613,10 @@ def verifier_config() -> None:
     ):
         _positif(nom, val)
 
-    for nom, val in (("RETARD_SENS_ALLER_S", RETARD_SENS_ALLER_S),
-                     ("TEMPS_AVANT_COUPE_S", TEMPS_AVANT_COUPE_S),
+    for nom, val in (("TEMPS_AVANT_COUPE_S", TEMPS_AVANT_COUPE_S),
                      ("TEMPS_APRES_COUPE_S", TEMPS_APRES_COUPE_S),
                      ("TEMPS_GARDE_APRES_ACTION_S", TEMPS_GARDE_APRES_ACTION_S),
-                     ("MOTEUR_SURCOURSE_DEG", MOTEUR_SURCOURSE_DEG),
+                     ("TEMPS_GARDE_APRES_ROTATION_S", TEMPS_GARDE_APRES_ROTATION_S),
                      ("I2C_RETRIES", I2C_RETRIES)):
         if val < 0:
             erreurs.append(f"{nom} = {val} — doit être positif ou nul")
@@ -615,40 +624,53 @@ def verifier_config() -> None:
     if not 50 <= FREQUENCE_BOUCLE_HZ <= 1000:
         erreurs.append(f"FREQUENCE_BOUCLE_HZ = {FREQUENCE_BOUCLE_HZ} — attendu entre 50 et 1000")
 
-    # ── Cohérence du profil de mouvement
-    vitesse_max = max(MOTEUR_VITESSE_MAX_SPS.values())
-    for poste, vitesse in MOTEUR_VITESSE_MAX_SPS.items():
-        if MOTEUR_VITESSE_APPROCHE_SPS > vitesse:
-            erreurs.append(f"MOTEUR_VITESSE_APPROCHE_SPS > MOTEUR_VITESSE_MAX_SPS[{poste}]")
-    if MOTEUR_LARGEUR_IMPULSION_US * 1e-6 >= 0.5 / vitesse_max:
-        erreurs.append("MOTEUR_LARGEUR_IMPULSION_US trop grand pour MOTEUR_VITESSE_MAX_SPS")
-    for poste in POSTES:
-        # Une course trop courte pour atteindre la vitesse max n'est pas une
-        # erreur : _profil_axe() raccourcit les rampes et baisse la pointe.
-        if MOTEUR_FIN_DECEL_PAS.get(poste, 1) <= 0:
-            erreurs.append(f"{poste} : MOTEUR_DISTANCE_APPROCHE_DEG >= course de l'axe")
-        if MOTEUR_DEGAGEMENT_MAX_PAS >= MOTEUR_COURSE_PAS.get(poste, MOTEUR_DEGAGEMENT_MAX_PAS + 1):
-            erreurs.append(f"{poste} : MOTEUR_DEGAGEMENT_MAX_DEG >= course de l'axe")
-    if MOTEUR_SURCOURSE_PAS >= MOTEUR_MARGE_PAS:
-        erreurs.append("MOTEUR_SURCOURSE_DEG >= MOTEUR_MARGE_DEG — la surcourse doit tenir dans la marge")
-    # D4 ne doit pas se déclencher à tort quand l'axe part de loin derrière son
-    # galet (après un D1) : marge + surcourse + pas parcourus pendant le retard
-    # de l'anti-rebond à vitesse max.
-    retard_pas = vitesse_max * (ANTI_REBOND_CAPTEUR_S + 2 * PERIODE_BOUCLE_S)
-    degagement_mini = MOTEUR_MARGE_PAS + MOTEUR_SURCOURSE_PAS + retard_pas
-    if MOTEUR_DEGAGEMENT_MAX_PAS <= degagement_mini:
-        erreurs.append(
-            f"MOTEUR_DEGAGEMENT_MAX_DEG trop petit : {MOTEUR_DEGAGEMENT_MAX_PAS} pas, il en faut plus de "
-            f"{degagement_mini:.0f} (marge + surcourse + retard d'anti-rebond)")
+    # ── Cohérence des vitesses
+    if not VITESSE_DEMARRAGE_DEG_S < VITESSE_CROISIERE_DEG_S:
+        erreurs.append("VITESSE_DEMARRAGE_DEG_S doit être < VITESSE_CROISIERE_DEG_S")
+    if not VITESSE_RECHERCHE_LENTE_DEG_S < VITESSE_RECHERCHE_RAPIDE_DEG_S:
+        erreurs.append("VITESSE_RECHERCHE_LENTE_DEG_S doit être < VITESSE_RECHERCHE_RAPIDE_DEG_S")
+    for nom, vitesse in (("VITESSE_RECHERCHE_RAPIDE_DEG_S", VITESSE_RECHERCHE_RAPIDE_DEG_S),
+                         ("VITESSE_RECENTRAGE_DEG_S", VITESSE_RECENTRAGE_DEG_S)):
+        if vitesse <= VITESSE_DEMARRAGE_DEG_S:
+            erreurs.append(f"{nom} doit être > VITESSE_DEMARRAGE_DEG_S (la rampe part de là)")
+    if MOTEUR_LARGEUR_IMPULSION_US * 1e-6 >= 0.5 / VITESSE_MAX_SPS:
+        erreurs.append("MOTEUR_LARGEUR_IMPULSION_US trop grand pour la vitesse maximale")
 
-    # ── Confirmation d'arrivée : surcourse à vitesse d'approche + anti-rebond
-    #    + lectures d'arrêt doivent tenir dans CONFIRMATION_CAPTEUR_MAX_S.
-    duree_confirmation = (MOTEUR_SURCOURSE_PAS / MOTEUR_VITESSE_APPROCHE_SPS
-                          + ANTI_REBOND_CAPTEUR_S + 3 * PERIODE_BOUCLE_S)
+    # ── Cohérence de la géométrie
+    for poste, degres in PLAGE_NOMINALE_DEG.items():
+        if PLAGE_TOLERANCE_DEG >= degres / 2:
+            erreurs.append(f"PLAGE_TOLERANCE_DEG >= la moitié de PLAGE_NOMINALE_DEG[{poste}]")
+        if RECUL_CONFIRMATION_DEG + TOLERANCE_CONFIRMATION_DEG >= degres / 2:
+            erreurs.append(f"RECUL + TOLERANCE_CONFIRMATION >= la moitié de PLAGE_NOMINALE_DEG[{poste}]")
+        if DEGAGEMENT_MAX_DEG >= degres - PLAGE_TOLERANCE_DEG:
+            erreurs.append(f"DEGAGEMENT_MAX_DEG >= plage minimale acceptée de {poste}")
+
+    # Retard entre l'arrivée sur une butée et l'arrêt du thread : lectures
+    # consécutives exigées + une période de boucle, à la vitesse maximale.
+    retard_arret_pas = VITESSE_MAX_SPS * (CAPTEUR_LECTURES_ARRET + 1) * PERIODE_BOUCLE_S
+    if MARGE_DEPASSEMENT_PAS <= retard_arret_pas:
+        erreurs.append(
+            f"MARGE_DEPASSEMENT_DEG trop petite : {MARGE_DEPASSEMENT_PAS} pas, le retard d'arrêt "
+            f"en demande déjà {retard_arret_pas:.0f}")
+    # D4 ne doit pas se déclencher à tort quand le mandrin part de derrière sa
+    # butée (après un D1) : marge + retard d'anti-rebond à vitesse maximale.
+    degagement_mini = (MARGE_DEPASSEMENT_PAS
+                       + VITESSE_MAX_SPS * (ANTI_REBOND_CAPTEUR_S + 2 * PERIODE_BOUCLE_S))
+    if DEGAGEMENT_MAX_PAS <= degagement_mini:
+        erreurs.append(
+            f"DEGAGEMENT_MAX_DEG trop petit : {DEGAGEMENT_MAX_PAS} pas, il en faut plus de "
+            f"{degagement_mini:.0f} (marge + retard d'anti-rebond)")
+    # Le recul doit pouvoir relâcher le galet avant que D4 ne se déclenche.
+    if RECUL_CONFIRMATION_DEG >= DEGAGEMENT_MAX_DEG:
+        erreurs.append("RECUL_CONFIRMATION_DEG doit être < DEGAGEMENT_MAX_DEG")
+
+    # ── Confirmation d'arrivée : anti-rebond + lectures d'arrêt doivent tenir
+    #    dans CONFIRMATION_CAPTEUR_MAX_S.
+    duree_confirmation = ANTI_REBOND_CAPTEUR_S + 3 * PERIODE_BOUCLE_S
     if duree_confirmation >= CONFIRMATION_CAPTEUR_MAX_S:
         erreurs.append(
-            f"CONFIRMATION_CAPTEUR_MAX_S = {CONFIRMATION_CAPTEUR_MAX_S} s — trop court : la surcourse "
-            f"et l'anti-rebond demandent déjà {duree_confirmation:.3f} s")
+            f"CONFIRMATION_CAPTEUR_MAX_S = {CONFIRMATION_CAPTEUR_MAX_S} s — trop court : "
+            f"l'anti-rebond demande déjà {duree_confirmation:.3f} s")
 
     if erreurs:
         raise ValueError("config.py :\n  - " + "\n  - ".join(erreurs))

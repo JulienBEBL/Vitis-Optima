@@ -1,6 +1,7 @@
 # Vitis Optima — indus V3 · Document de logique
 
-Version 3.0 — 2026-10-27. **Projet, à valider par Julien.**
+Version 3.1 — 2026-10-27. Validée par Julien le 2026-10-27 (3.1 : initialisation en deux
+passes, rapide puis lente, de chaque côté).
 
 Ce document fige la logique de pilotage du prototype indus V3. Il est la référence :
 `config.py` porte les valeurs, le code implémente ce qui est écrit ici, rien d'autre.
@@ -125,17 +126,25 @@ Sur ACQUITTEMENT, depuis ATTENTE_ACQUITTEMENT ou DEFAUT. Les deux postes s'initi
 1. **Ouverture du mandrin** : relais à 0. S'il était fermé ou en manœuvre, attente de
    `TEMPS_MANOEUVRE_MANDRIN_S` avant tout mouvement (la branche ne doit pas être vrillée).
 2. **Excitation du moteur** (ENA ← excité). Il le restera jusqu'à un défaut ou l'arrêt.
-3. **Recherche de la première butée** (sens `INIT_PREMIER_SENS`) à `VITESSE_RECHERCHE`,
-   rampe en S au démarrage, arrêt sur la butée. Déjà sur cette butée : étape sautée.
-   Budget : plage nominale + marge → sinon **D8**.
-4. **Recherche de la seconde butée**, sens opposé, même vitesse. Le nombre de pas parcouru
-   **est la plage mesurée**. Budget : plage nominale + marge → sinon **D8**.
+3. **Première butée** (sens `INIT_PREMIER_SENS`), en **deux passes** (validé le 2026-10-27) :
+   - **passe rapide** à `VITESSE_RECHERCHE_RAPIDE`, rampe en S au démarrage, arrêt sur la
+     butée : on la trouve grossièrement. Déjà sur cette butée : passe sautée.
+     Budget : plage nominale + marge → sinon **D8** ;
+   - **recul** de `RECUL_CONFIRMATION_DEG` (mouvement vers une position, § 8.3) ; la butée
+     doit se relâcher → sinon **D4** ;
+   - **passe lente** de confirmation à `VITESSE_RECHERCHE_LENTE`, sans rampe, arrêt sur la
+     butée. Budget : recul + `TOLERANCE_CONFIRMATION_DEG` → sinon **D8**.
+     **C'est cet arrêt lent qui fixe la position 0** (ou `plage`).
+4. **Seconde butée**, sens opposé, mêmes trois temps. La position de l'arrêt lent **est la
+   plage mesurée**.
 5. **Contrôle de la plage** : écart à `PLAGE_NOMINALE_DEG` supérieur à
    `PLAGE_TOLERANCE_DEG` → **D9**.
-6. **Centrage** : mouvement jusqu'à la moitié de la plage mesurée (§ 8.3).
-7. Double bip, journal (plage mesurée en pas et en degrés) → **PRET**.
+6. **Centrage** : mouvement jusqu'à la moitié de la plage mesurée (§ 8.3), à
+   `VITESSE_RECENTRAGE`.
+7. Double bip, journal (plage mesurée, écart passe rapide / passe lente) → **PRET**.
 
-Durée au pire (plage 130°, départ sur la seconde butée, 10°/s) : 13 s + 13 s + 6,5 s ≈ 33 s.
+Durée au pire (plage 130°, départ sur la seconde butée, passes à 20°/s et 3°/s, recul 5°,
+centrage à 10°/s) : 2 × (6,5 s + 0,5 s + 1,7 s) + 6,5 s ≈ 24 s.
 
 ### 3.2 Repère de position
 
@@ -359,7 +368,8 @@ DEM│─────╱
 ```
 
 Le thread n'a pas de longueur prévue : il tourne jusqu'au drapeau d'arrêt ou au budget.
-La recherche de butée de l'initialisation utilise le même profil à `VITESSE_RECHERCHE`.
+La passe rapide de l'initialisation utilise le même profil à `VITESSE_RECHERCHE_RAPIDE`.
+La passe lente part directement à `VITESSE_RECHERCHE_LENTE`, sans rampe.
 
 ### 8.3 Mouvement vers une position (centrage, recentrage)
 
@@ -479,4 +489,5 @@ Ordre d'écriture : `config.py` (relu par Julien) → `materiel` / `entrees` →
 | `DIR_VERS_HORAIRE`, `SENS_ROTATION_PLUS` | le bon moteur tourne du bon côté | test_5 |
 | `PLAGE_NOMINALE_DEG` | mesurer butée à butée | test_6 |
 | `VITESSE_CROISIERE`, `DUREE_RAMPE_ROTATION_S`, `VITESSE_DEMARRAGE` | à l'œil et à la main, avec branche | test_5, test_7 |
+| `VITESSE_RECHERCHE_RAPIDE` / `_LENTE`, `RECUL_CONFIRMATION_DEG` | initialisation : rapide sans décrochage, écart rapide / lente faible | main.py |
 | `MARGE_DEPASSEMENT_DEG` | ce que le tuyau accepte au-delà d'une butée | observation |

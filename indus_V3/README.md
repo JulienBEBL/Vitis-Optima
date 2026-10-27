@@ -5,8 +5,10 @@ chacun avec un bridage, une coupe et un axe NEMA 34. Raspberry Pi 5, Python 3.11
 
 > **V3 en préparation.** Ce dossier est une copie de `indus_V2/` au commit `f529fc0`
 > (2026-10-14, V2 validée sur 5 cycles). Les modifications matérielles et logiques de la V3
-> sont suivies dans **CHANGEMENTS_V3.md** ; tant qu'elles ne sont pas codées, ce
-> programme se comporte exactement comme la V2.
+> sont suivies dans **CHANGEMENTS_V3.md**. **En cours de réécriture** : LOGIQUE.md et
+> config.py sont à jour pour la V3, `main.py`, `libs/` et `tests/` pas encore —
+> **ne rien lancer sur la machine** tant que ce bandeau est là. Le reste de ce README
+> décrit encore la V2.
 
 - **LOGIQUE.md** — la logique : états, transitions, interlocks, défauts, mapping E/S.
 - **config.py** — le seul fichier à modifier : broches, durées, vitesses.
