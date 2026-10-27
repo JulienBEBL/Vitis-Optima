@@ -40,7 +40,7 @@ validée avant la suivante.
 | Cycle | bridage → coupe → POSITION maître puis esclave → ouverture des 2 pinces → ACQUITTEMENT | **par poste, indépendant, au choix de l'opérateur** : BRIDAGE (mandrin fermé) → déplacement manuel du bloc → rotation à la demande → COUPE → recul manuel du bloc → BRIDAGE (mandrin ouvert, branche récupérée) |
 | Maître / esclave | fille maître, I7, I9, retard sens aller | **supprimé** |
 | Enchaînement | aucun automatisme | **aucun automatisme** |
-| Rotation | mouvement d'un capteur à l'autre, sur appui | **maintenu = tourne, relâché = arrêt immédiat**. Rampe de démarrage douce et longue, croisière lente (≈ 150° en 10 s, ⚠ à ajuster). Les 2 moteurs peuvent tourner en même temps |
+| Rotation | mouvement d'un capteur à l'autre, sur appui | **maintenu = tourne, relâché = arrêt immédiat**. Rampe de démarrage douce et longue, croisière lente **10°/s** (⚠ à ajuster). Les 2 moteurs peuvent tourner en même temps |
 | Butées | — | arrêt **sur le capteur** ; sur un capteur, seul le sens opposé est accepté |
 | Rotation autorisée | — | **tout le temps, sauf pendant la séquence de coupe** (mandrin ouvert ou fermé) |
 | Coupe | séquence avant → impulsion → après | **même séquence** ; **interdite si le mandrin du poste est ouvert** (poste par poste) |
@@ -63,10 +63,16 @@ validée avant la suivante.
 | 2026-10-27 | Initialisation sur ACQUITTEMENT : deux butées puis centrage, les deux postes en même temps. |
 | 2026-10-27 | Retour au centre seulement sur ACQUITTEMENT. |
 | 2026-10-27 | Pas de défaut « sens inversé ». |
+| 2026-10-27 | Croisière de rotation : 10°/s. |
+| 2026-10-27 | ACQUITTEMENT en marche recentre les deux postes ; il rouvre d'abord le mandrin s'il est fermé ; refusé pour un poste occupé. |
+| 2026-10-27 | Un poste fait une chose à la fois (§ 4.5). |
+| 2026-10-27 | Demi-courant à l'arrêt gardé (SW4 = OFF) : pas besoin du courant plein pendant la coupe. |
+| 2026-10-27 | Buzzer en rotation : pas de bip à l'appui, bip long si refusé, bip court sur butée. |
+| 2026-10-27 | Validés : ROTATION − sur le MCP 0x26 (fins de course + ACQUITTEMENT) GPA4 / GPA5, sécurité du tuyau (§ 4.3), drivers 6400 pas/tr et 4,28 A RMS (§ 4.4). |
 
 ---
 
-## 4. Propositions — en attente de validation (2026-10-27)
+## 4. Propositions — validées le 2026-10-27
 
 ### 4.1 Câblage des 2 nouveaux boutons → 0x26 GPA4 et GPA5
 
@@ -82,10 +88,10 @@ a B0 (ACQUITTEMENT) et B1..B4 (capteurs) ; le **0x26 port A a GPA4..GPA7 câblé
 
 - **Démarrage** : le moteur part d'une vitesse très basse et monte en S jusqu'à la croisière
   sur ≈ 1 s (⚠ à régler).
-- **Croisière** : 150° en 10 s = 15°/s.
+- **Croisière** : **10°/s** (demandé le 2026-10-27).
 - **Relâchement** : arrêt au pas suivant. Le relâchement est pris sur la **lecture brute**
-  (comme les capteurs en V2), sans attendre l'anti-rebond de 50 ms : à 15°/s, 50 ms
-  feraient 0,75° de trop. Latence visée : 4 à 8 ms, soit ≈ 0,1°.
+  (comme les capteurs en V2), sans attendre l'anti-rebond de 50 ms : à 10°/s, 50 ms
+  feraient 0,5° de trop. Latence visée : 4 à 8 ms, soit < 0,1°.
   À cette vitesse, un pas-à-pas s'arrête net sans perdre de pas : pas besoin de rampe d'arrêt.
 - **Butée** : capteur atteint → arrêt immédiat (sans surcourse), seul le sens opposé est
   accepté tant que le capteur est actif.
@@ -106,7 +112,7 @@ chaque passage sur une butée.
 
 | Réglage | Proposé | Pourquoi |
 |---|---|---|
-| Micropas | **6400 pas/tr** (SW5..SW8 = ON/ON/OFF/ON ⚠ à vérifier sur l'étiquette) | 0,056° par pas ; croisière à 15°/s = **267 pas/s** par moteur, 534 pas/s pour les deux ensemble. La V2 tenait 600 pas/s sur un seul thread : marge suffisante pour deux threads. On peut monter à 12 800 si besoin de plus de douceur, en vérifiant la régularité. |
+| Micropas | **6400 pas/tr** (SW5..SW8 = ON/ON/OFF/ON ⚠ à vérifier sur l'étiquette) | 0,056° par pas ; croisière à 10°/s = **178 pas/s** par moteur, 356 pas/s pour les deux ensemble. La V2 tenait 600 pas/s sur un seul thread : marge suffisante pour deux threads. On peut monter à 12 800 si besoin de plus de douceur, en vérifiant la régularité. |
 | Courant | **4,28 A RMS / 5,14 A crête** (SW1..SW3 = ON/ON/OFF) | ≈ 85 % des 5,0 A du moteur : la vitesse est faible, le couple suffit, le moteur chauffe moins. Monter d'un cran si l'axe décroche. |
 | Demi-courant à l'arrêt (SW4) | ⚠ question | à l'arrêt, le couple de maintien est divisé par deux : à voir si le mandrin doit tenir son angle pendant la coupe. |
 
@@ -117,23 +123,17 @@ refusée ; pendant la rotation, BRIDAGE et COUPE sont refusés.
 
 ---
 
-## 5. Questions ouvertes (2026-10-27)
+## 5. Questions ouvertes
 
-1. ACQUITTEMENT en marche (retour au centre) : les deux postes ensemble ? Autorisé mandrin
-   fermé ? Refusé pour un poste occupé (coupe, rotation) ?
-2. Valider § 4.5 : BRIDAGE et COUPE refusés pendant la rotation, rotation refusée pendant la
-   manœuvre du mandrin ?
-3. SW4 : demi-courant à l'arrêt ou pleine intensité pour tenir le mandrin pendant la coupe ?
-4. Buzzer en rotation : pas de bip à l'appui (il bipperait sans cesse) ; bip long si refusé ;
-   un bip court à l'arrivée sur une butée ?
-5. Valider § 4.1 (câblage), § 4.3 (sécurité du tuyau), § 4.4 (drivers).
+Toutes tranchées le 2026-10-27 (voir § 3).
 
 ## 6. Avancement
 
 - [x] 2026-10-27 — dossier `indus_V3/` créé (copie de la V2, comportement inchangé)
 - [x] 2026-10-27 — réponses de Julien consignées (§ 1 à 3)
-- [ ] Propositions § 4 et questions § 5 validées
-- [ ] `LOGIQUE.md` réécrit pour la V3 et validé
+- [x] 2026-10-27 — propositions § 4 et questions § 5 validées
+- [x] 2026-10-27 — `LOGIQUE.md` réécrit pour la V3 (projet 3.0)
+- [ ] `LOGIQUE.md` validé par Julien
 - [ ] `config.py` mis à jour et validé
 - [ ] Code (`main.py`, `libs/`)
 - [ ] Scripts de test (`tests/`)
