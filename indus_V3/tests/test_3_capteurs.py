@@ -4,9 +4,10 @@ test_3_capteurs.py — Aperçu en direct des 4 butées de rotation (fins de cour
 
 Lecture seule : aucun relais, aucun ENA n'est écrit.
 
-    python3 tests/test_3_capteurs.py                 APERÇU (par défaut)
-    python3 tests/test_3_capteurs.py --attribution   refaire la correspondance
-    python3 tests/test_3_capteurs.py --direct        bits bruts de tous les ports
+Lancer depuis Geany (F5). Un menu propose :
+    1 = APERÇU des 4 butées selon config.py (par défaut)
+    2 = ATTRIBUTION : refaire la correspondance
+    3 = DIRECT : bits bruts de tous les ports
 
 APERÇU : un voyant par butée, selon config.py. Galet actionné = voyant allumé.
 Signale si les deux butées d'un même poste sont actives ensemble (ce serait un
@@ -32,7 +33,7 @@ bougé. Sert aussi au test de débranchement : galet actionné, débrancher le
 connecteur → le bit doit revenir à 1 (repli sûr du contact NO).
 """
 
-import sys
+
 import time
 
 import _commun
@@ -192,12 +193,9 @@ def mode_apercu() -> None:
 
 
 try:
-    if "--attribution" in sys.argv:
-        mode_attribution()
-    elif "--direct" in sys.argv:
-        mode_direct()
-    else:
-        mode_apercu()
+    mode = _commun.menu("Que faire ?", {"1": "APERÇU des butées", "2": "ATTRIBUTION (le câblage a changé)",
+                                         "3": "DIRECT : bits bruts"}, "1")
+    {"1": mode_apercu, "2": mode_attribution, "3": mode_direct}[mode]()
 except KeyboardInterrupt:
     print("\n  Abandonné.\n")
 finally:

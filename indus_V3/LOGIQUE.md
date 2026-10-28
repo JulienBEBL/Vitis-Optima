@@ -477,11 +477,11 @@ Même arborescence que la V2. À la racine : `main.py`, `config.py`, les `.md`.
 | `libs/journal.py` | faible | nouvelles clés de compteurs |
 | `main.py` | faible | libellés |
 | `tests/test_1_i2c.py` | aucune | — |
-| `tests/test_2_boutons.py` | moyenne | 9 boutons, dont les 2 du 0x26 port A |
+| `tests/test_2_boutons.py` | **forte** | menu : validation de config.py (bon bouton, maintien des rotations), attribution guidée, aperçu |
 | `tests/test_3_capteurs.py` | moyenne | butées HORAIRE / ANTIHORAIRE |
 | `tests/test_4_relais.py` | faible | EV mandrin au lieu de bridage |
-| `tests/test_5_moteur.py` | **forte** | rotation au clavier, maintien simulé, sens HORAIRE, arrêt sur butée |
-| `tests/test_6_course.py` | moyenne | mesure de la **plage** butée à butée |
+| `tests/test_5_moteur.py` | **réécrit** | mise en service : quel moteur est qui et sens, butées, remise à zéro et course totale, boutons ROTATION |
+| `tests/test_6_reglage.py` | **nouveau** | réglage des vitesses et des rampes : essais, recherche de la vitesse max et de la rampe min |
 | `tests/test_7_rodage.py` | moyenne | allers-retours butée à butée, **deux moteurs en même temps** |
 | `tests/test_8_cycle.py` | **forte** | cycle V3 par poste, appuis simulés |
 
@@ -500,7 +500,7 @@ Ordre d'écriture : `config.py` (relu par Julien) → `materiel` / `entrees` →
 | `TEMPS_MANOEUVRE_MANDRIN_S`, temps de coupe | chronométrer | test_4 |
 | DIP des drivers : 6400 pas/tr, 4,28 A RMS | **lire l'étiquette** | — |
 | `DIR_VERS_HORAIRE`, `SENS_ROTATION_PLUS` | le bon moteur tourne du bon côté | test_5 |
-| `PLAGE_NOMINALE_DEG` | mesurer butée à butée | test_6 |
+| `PLAGE_NOMINALE_DEG` | mesurer butée à butée | test_5 étape 3 |
 | `VITESSE_CROISIERE`, `DUREE_RAMPE_ROTATION_S`, `VITESSE_DEMARRAGE` | à l'œil et à la main, avec branche | test_5, test_7 |
 | `VITESSE_RECHERCHE_RAPIDE` / `_LENTE`, `RECUL_CONFIRMATION_DEG` | initialisation : rapide sans décrochage, écart rapide / lente faible | main.py |
 | `MARGE_DEPASSEMENT_DEG` | ce que le tuyau accepte au-delà d'une butée | observation |

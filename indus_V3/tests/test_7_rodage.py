@@ -3,7 +3,7 @@
 test_7_rodage.py — Allers-retours des DEUX mandrins, butée à butée, en même temps.
 
 ⚠ CE TEST FAIT TOURNER LES DEUX MOTEURS EN MÊME TEMPS. Arrêt d'urgence à portée
-   de main, mandrins vides. test_5 et test_6 validés sur les deux postes d'abord.
+   de main, mandrins vides. test_5 validé et test_6 fait sur les deux postes d'abord.
 
     python3 tests/test_7_rodage.py
 

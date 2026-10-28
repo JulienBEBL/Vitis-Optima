@@ -1,233 +1,382 @@
 # -*- coding: utf-8 -*-
 """
-test_5_moteur.py — Un poste : bon moteur, sens de rotation, butées, puis boutons ROTATION ±.
+test_5_moteur.py — Mise en service des moteurs, étape par étape.
 
-⚠ CE TEST FAIT TOURNER UN MOTEUR. Arrêt d'urgence à portée de main, mandrin
-   vide. Tests 2 et 3 validés d'abord : l'arrêt dépend des butées.
-⚠ Avant le premier lancement : vérifier les DIP des drivers (6400 pas/tr,
+⚠ CE TEST FAIT TOURNER LES MOTEURS. Arrêt d'urgence à portée de main, mandrins
+   vides. Tests 2 et 3 validés d'abord. DIP des drivers vérifiés (6400 pas/tr,
    voir DRIVER_DIP_SWITCH dans config.py).
 
-    python3 tests/test_5_moteur.py
+Lancer depuis Geany (F5). Tout se fait au clavier, le programme se termine seul.
+Chaque étape demande ton accord avant de faire bouger quoi que ce soit, et
+utilise les corrections trouvées aux étapes précédentes, même si config.py
+n'est pas encore corrigé.
 
-PHASE 1 — COUPS AU CLAVIER (toi, à VITESSE_CROISIERE_DEG_S, sans rampe)
-      a = petit coup, DIR à 0        z = petit coup, DIR à 1
-      A = grand coup, DIR à 0        Z = grand coup, DIR à 1
-      s = état des butées            q = quitter
-  Chaque coup s'arrête tout seul dès qu'une butée du poste s'active.
-  Au premier coup : vérifier que c'est LE BON MOTEUR qui tourne (sinon q, et
-  revoir DIR_* / ENA_* / PUL_*), puis dire dans quel sens le mandrin a tourné,
-  VU DU CÔTÉ OPÉRATEUR. But : atteindre une butée, puis l'autre.
+ÉTAPE 1 — QUEL MOTEUR EST QUI (les deux drivers, l'un après l'autre)
+  Le programme fait faire au moteur « mère » de config.py un petit aller-retour
+  lent (IDENT_DEG, arrêt immédiat sur toute butée). Tu dis quel mandrin a
+  tourné, et dans quel SENS il est parti (vu côté opérateur). Puis pareil pour
+  le moteur « fille ». → correspondance driver ↔ poste, DIR_VERS_HORAIRE.
 
-PHASE 2 — RÉSULTAT
-  DIR_VERS_HORAIRE déduit de ton observation ; vérification que la butée
-  atteinte en tournant horaire est bien CAP_*_HORAIRE dans config.py ; plage
-  mesurée grossièrement (test_6 la mesure finement).
+ÉTAPE 2 — BUTÉES (poste par poste)
+  Rotation lente vers HORAIRE jusqu'à la première butée : est-ce bien la butée
+  HORAIRE de config.py ? Puis vers ANTIHORAIRE jusqu'à l'autre. Plage
+  approximative. → CAP_* à échanger ou non.
 
-PHASE 3 — BOUTONS ROTATION + / − (le vrai code du programme)
-  Initialisation réelle du poste (deux butées en deux passes, puis centrage),
-  puis tu tournes avec les VRAIS boutons ROTATION + et −, maintenus : rampe
-  de démarrage, croisière, arrêt au relâchement, arrêt sur butée. La position
-  s'affiche en direct. Fin automatique après 30 s sans rotation, puis dire si ROTATION + tourne dans
-  le sens voulu (SENS_ROTATION_PLUS).
-  La phase 3 utilise le sens trouvé en phase 2, même si config.py n'est
-  pas encore corrigé.
+ÉTAPE 3 — REMISE À ZÉRO ET COURSE TOTALE
+  Initialisation réelle du programme (passe rapide, recul, passe lente de chaque
+  côté, puis centrage), répétée plusieurs fois, les postes choisis ensemble.
+  → plage mesurée (PLAGE_NOMINALE_DEG), écart passe rapide / passe lente.
 
-Arrêt du moteur : relâcher le bouton, ou l'arrêt d'urgence. Ctrl+C l'arrête aussi, mais ferme la fenêtre de Geany.
+ÉTAPE 4 — BOUTONS ROTATION + / −
+  Les vrais boutons, maintenus : départ doux, croisière, arrêt au relâchement,
+  arrêt sur butée. Fin automatique après ESSAI_INACTIVITE_S sans rotation.
+  → SENS_ROTATION_PLUS.
+
+À la fin : RÉCAPITULATIF avec les lignes à recopier dans config.py, aussi
+ENREGISTRÉ dans logs/moteurs_<date>_<heure>.txt (réécrit après chaque étape).
+Le réglage des vitesses et des rampes se fait ensuite avec test_6_reglage.py.
 """
 
 import time
 
 import _commun
-from _commun import cfg, confirmer, question, titre, voyant
-from libs.entrees import ROTATION_MOINS, ROTATION_PLUS
-from libs.poste import ROTATION, Defaut
+from _commun import cfg, confirmer, menu, nombre, titre, voyant
+from libs import entrees as E
+from libs.entrees import ROTATION_MOINS, ROTATION_PLUS, Entrees
+from libs.moteur import Axe, PortsDrivers, periodes_rampe
+from libs.materiel import Buzzer
+from libs.poste import ROTATION, Defaut, Poste
 
-PETIT_COUP_DEG = 2.0
-GRAND_COUP_DEG = 15.0
-ESSAI_INACTIVITE_S = 30.0   # phase 3 : fin automatique après ce temps sans rotation (Ctrl+C ferme Geany)
+IDENT_DEG = 5.0                 # étape 1 : amplitude de l'aller-retour d'identification
+IDENT_VITESSE_DEG_S = 5.0       # étape 1 : vitesse, lente pour bien voir
+BUTEE_VITESSE_DEG_S = 10.0      # étape 2 : vitesse de recherche des butées
+MESURES_PAR_DEFAUT = 3          # étape 3
+ESSAI_INACTIVITE_S = 30.0       # étape 4 : fin automatique après ce temps sans rotation
 H, A = cfg.SENS_HORAIRE, cfg.SENS_ANTIHORAIRE
 
-titre("TEST 5 — MOTEUR : SENS, BUTÉES, BOUTONS ROTATION")
-choix = question("Poste à tester : m = mère, f = fille ?")
-nom = cfg.POSTE_MERE if choix == "m" else cfg.POSTE_FILLE if choix == "f" else None
-if nom is None:
-    raise SystemExit("  choix invalide")
+# Les deux emplacements de driver, tels que config.py les attribue aujourd'hui.
+DRIVERS = {
+    cfg.POSTE_MERE: {"PUL": cfg.PUL_MERE, "DIR": cfg.DIR_MERE, "ENA": cfg.ENA_MERE},
+    cfg.POSTE_FILLE: {"PUL": cfg.PUL_FILLE, "DIR": cfg.DIR_FILLE, "ENA": cfg.ENA_FILLE},
+}
 
+FICHIER = _commun.fichier_resultat("moteurs")
+corrections = []        # lignes « à recopier dans config.py »
+journal = [f"TEST 5 — mise en service des moteurs — {time.strftime('%Y-%m-%d %H:%M:%S')}"]
+
+
+def noter(ligne: str) -> None:
+    """Affiche, garde pour le récapitulatif, réécrit le fichier."""
+    print(ligne)
+    journal.append(ligne.strip("\n"))
+    _commun.enregistrer(FICHIER, journal + ["", "À recopier dans config.py :"] + corrections)
+
+
+def corriger(ligne: str) -> None:
+    corrections.append("  " + ligne)
+    noter(f"    → config.py : {ligne}")
+
+
+titre("TEST 5 — MISE EN SERVICE DES MOTEURS")
 materiel = _commun.ouvrir(avec_gpio=True)
-entrees, postes, buzzer = _commun.construire_postes(materiel, (nom,))
-poste = postes[nom]
-axe = poste.axe
-butees = {H: entrees.butee(nom, H), A: entrees.butee(nom, A)}
+ports = PortsDrivers(materiel.drivers)
+entrees = Entrees(materiel.relais, materiel.entrees)
+buzzer = Buzzer(materiel.puce)
+axes = {}
+postes = {}
 
 
 def lire_butees() -> dict:
-    """État stable des deux butées du poste (anti-rebond rempli)."""
+    """État stable des 4 butées (anti-rebond rempli) : (poste, sens) → bool."""
     for _ in range(12):
         entrees.rafraichir(time.monotonic())
         time.sleep(cfg.PERIODE_BOUCLE_S)
-    return {sens: butee.stable for sens, butee in butees.items()}
+    return {cle: filtre.stable for cle, filtre in entrees.butees.items()}
 
 
-def afficher(etat: dict) -> None:
-    print(f"    butées {nom} :  ANTIHORAIRE {voyant(etat[A])}   HORAIRE {voyant(etat[H])}")
-
-
-def coup(niveau_dir: int, degres: float, actives_avant: dict) -> tuple:
-    """Un coup au clavier, vitesse constante. S'arrête sur toute butée qui n'était
-    pas active au départ. Renvoie (pas effectués, pas à la détection, butée ou None)."""
-    nombre = max(1, round(cfg.PAS_PAR_DEGRE * degres))
-    axe.lancer_niveau(niveau_dir, nombre, (), 1.0 / cfg.VITESSE_CROISIERE_SPS)
-    atteinte, pas_detection = None, None
+def tourner(axe: Axe, niveau_dir: int, pas: int, vitesse_deg_s: float, surveiller: list) -> tuple:
+    """Rotation à vitesse constante (après la rampe), arrêt au budget ou sur la
+    première butée de `surveiller` qui s'active (si elle n'était pas déjà active).
+    Renvoie (pas faits, butée vue ou None, pas à la détection)."""
+    vitesse = vitesse_deg_s * cfg.PAS_PAR_DEGRE
+    actives = {cle for cle, actif in lire_butees().items() if actif}
+    axe.lancer_niveau(niveau_dir, pas, periodes_rampe(vitesse), 1.0 / vitesse)
+    vue, detection = None, None
     try:
         while axe.en_marche:
             entrees.rafraichir(time.monotonic())
-            if atteinte is None:
-                for sens, butee in butees.items():
-                    if not actives_avant[sens] and butee.consecutifs >= cfg.CAPTEUR_LECTURES_ARRET:
-                        atteinte, pas_detection = sens, axe.pas
-                        axe.demander_arret()
+            for cle in surveiller:
+                filtre = entrees.butees[cle]
+                if cle in actives and not filtre.brut:
+                    actives.discard(cle)            # butée de départ relâchée : surveillée désormais
+                if vue is None and cle not in actives and filtre.consecutifs >= cfg.CAPTEUR_LECTURES_ARRET:
+                    vue, detection = cle, axe.pas
+                    axe.demander_arret()
             time.sleep(cfg.PERIODE_BOUCLE_S)
     finally:
         axe.demander_arret()
         axe.attendre_fin(cfg.ARRET_THREAD_MAX_S)
     if axe.erreur is not None:
         raise RuntimeError(f"génération d'impulsions interrompue : {axe.erreur}")
-    return axe.pas, pas_detection, atteinte
+    return axe.pas, vue, detection
 
 
-try:
-    # ── PHASE 1 : COUPS AU CLAVIER ─────────────────────────────────────────
-    axe.exciter()
-    time.sleep(cfg.MOTEUR_ENA_AVANT_DIR_S)
-    etat = lire_butees()
-    if etat[H] and etat[A]:
-        raise SystemExit("  ⚠ les deux butées sont actives (défaut D2) — voir test_3")
-    print(f"\n  PHASE 1 — coups au clavier, poste {nom.upper()}, à {cfg.VITESSE_CROISIERE_DEG_S:.0f}°/s.")
-    print(f"    a / z = coup de {PETIT_COUP_DEG:.0f}° (DIR 0 / DIR 1)     "
-          f"A / Z = coup de {GRAND_COUP_DEG:.0f}°")
-    print("    s = état des butées      q = quitter")
-    print("  But : atteindre une butée, puis l'autre.")
-    afficher(etat)
+# ═══════════════════════════════════════════════════════════════════════════
+#  ÉTAPE 1 — QUEL MOTEUR EST QUI
+# ═══════════════════════════════════════════════════════════════════════════
 
-    position = 0             # en pas, signée : DIR 1 = +, DIR 0 = −
-    trouve = {}              # butée → (niveau DIR, position en pas à la détection)
-    dir_horaire_observe = None
-    while len(trouve) < 2:
-        commande = input("\n  > ").strip()
-        if commande == "q":
-            raise SystemExit("  Arrêt demandé.")
-        if commande == "s":
-            etat = lire_butees()
-            afficher(etat)
-            continue
-        if commande not in ("a", "z", "A", "Z"):
-            print("    touches : a z A Z s q")
-            continue
-        niveau = 1 if commande in ("z", "Z") else 0
-        degres = GRAND_COUP_DEG if commande in ("A", "Z") else PETIT_COUP_DEG
-
-        # Déjà sur une butée atteinte dans ce sens : on ne pousse pas plus loin.
-        en_butee = [s for s, (n, _) in trouve.items() if n == niveau and etat[s]]
-        if en_butee:
-            print(f"    refusé : le mandrin est déjà sur la butée {en_butee[0].upper()} "
-                  "dans ce sens. Repartir dans l'autre sens.")
-            continue
-
-        signe = 1 if niveau else -1
-        pas, pas_detection, atteinte = coup(niveau, degres, etat)
-        if dir_horaire_observe is None and pas > 0:
-            reponse = question("Le bon moteur a tourné ? Sens du mandrin vu côté opérateur : "
-                               "h = horaire, a = antihoraire, n = mauvais moteur ?")
-            if reponse == "n":
-                raise SystemExit("  → revoir DIR_MERE / DIR_FILLE, ENA_*, PUL_* dans config.py")
-            if reponse in ("h", "a"):
-                dir_horaire_observe = niveau if reponse == "h" else 1 - niveau
-        if atteinte is not None:
-            trouve[atteinte] = (niveau, position + signe * pas_detection)
-            print(f"    ✓ butée {atteinte.upper()} atteinte avec DIR = {niveau}")
-        position += signe * pas
-        etat = lire_butees()
-        print(f"    {pas} pas, DIR = {niveau}, position {position:+d} pas")
-        afficher(etat)
-        if etat[H] and etat[A]:
-            raise SystemExit("  ⚠ les deux butées sont actives (défaut D2) — voir test_3")
-
-    # ── PHASE 2 : RÉSULTAT ─────────────────────────────────────────────────
-    dir_h, pos_h = trouve[H]
-    dir_a, pos_a = trouve[A]
-    plage = abs(pos_h - pos_a)
-    print("\n  PHASE 2 — résultat")
-    if dir_h == dir_a:
-        print("  ⚠ Les deux butées ont été atteintes avec le MÊME niveau de DIR.")
-        print("    Le signal DIR n'arrive pas au driver (DIR_MERE / DIR_FILLE, câblage DIR+ / DIR−),")
-        print("    ou les deux capteurs sont affectés au même galet.")
-        raise SystemExit(1)
-    if dir_horaire_observe is None:
-        dir_horaire_observe = dir_h
-        print("    (sens non observé : déduit des butées, en supposant config.py juste)")
-    print(f"    DIR_VERS_HORAIRE[{nom}] = {dir_horaire_observe}"
-          + ("   ✓ comme config.py" if dir_horaire_observe == cfg.DIR_VERS_HORAIRE[nom]
-             else "   ← À CORRIGER dans config.py"))
-    if dir_h != dir_horaire_observe:
-        print("    ⚠ La butée nommée HORAIRE dans config.py est atteinte en tournant ANTIHORAIRE :")
-        print(f"      échanger CAP_{nom.upper()}_HORAIRE et CAP_{nom.upper()}_ANTIHORAIRE dans config.py.")
-        print("      Phase 3 impossible tant que ce n'est pas corrigé.")
-        raise SystemExit(1)
-    print(f"    plage mesurée       = {plage} pas = {plage / cfg.PAS_PAR_DEGRE:.1f}° "
-          f"(config.py : {cfg.PLAGE_NOMINALE_DEG[nom]:.1f}°) — mesure fine : test_6")
-
-    # ── PHASE 3 : BOUTONS ROTATION ± ───────────────────────────────────────
-    print("\n  PHASE 3 — initialisation réelle du poste, puis essai des boutons ROTATION + / −.")
-    if not confirmer("Zone dégagée, lancer l'initialisation ?"):
+def etape_identification() -> None:
+    noter("\n  ÉTAPE 1 — QUEL MOTEUR EST QUI")
+    print(f"  Chaque moteur va faire un aller-retour de {IDENT_DEG:.0f}° à {IDENT_VITESSE_DEG_S:.0f}°/s.")
+    print("  Mandrins loin de leurs butées si possible (arrêt immédiat sur une butée de toute façon).")
+    if not confirmer("Mandrins vides, zone dégagée, lancer ?"):
         raise SystemExit("  Non lancé.")
-    # Le test utilise le sens qu'il vient de trouver, sans attendre la correction de config.py.
-    cfg.DIR_VERS_HORAIRE[nom], cfg.DIR_VERS_ANTIHORAIRE[nom] = dir_horaire_observe, 1 - dir_horaire_observe
-    # Plage pas encore mesurée finement : tolérance élargie pour ce test seulement.
-    cfg.PLAGE_TOLERANCE_PAS = max(cfg.PLAGE_TOLERANCE_PAS, round(0.4 * cfg.PLAGE_NOMINALE_PAS[nom]))
-    duree = _commun.initialiser(entrees, postes, buzzer)
-    print(f"    ✓ initialisé en {duree:.1f} s — plage {poste.degres(poste.plage)}, "
-          f"centré à {poste.degres(poste.position)}")
+    toutes_butees = list(entrees.butees)
+    trouve = {}                 # emplacement (nom config) → (poste réel, DIR vers horaire)
+    for emplacement, broches in DRIVERS.items():
+        axe = Axe(emplacement, materiel.puce, broches["PUL"], broches["DIR"], broches["ENA"], ports)
+        axe.exciter()
+        time.sleep(cfg.MOTEUR_ENA_AVANT_DIR_S)
+        pas = round(IDENT_DEG * cfg.PAS_PAR_DEGRE)
+        while True:
+            print(f"\n  Driver « {emplacement} » de config.py (PUL {broches['PUL']}, DIR GPA{broches['DIR']}, "
+                  f"ENA GPB{broches['ENA']}) : aller…", flush=True)
+            faits, vue, _ = tourner(axe, 0, pas, IDENT_VITESSE_DEG_S, toutes_butees)
+            if vue:
+                print(f"    (arrêt sur la butée {vue[1]} de {vue[0]})")
+            time.sleep(0.5)
+            print("    …retour", flush=True)
+            tourner(axe, 1, faits, IDENT_VITESSE_DEG_S, [])
+            qui = menu("Quel mandrin a tourné ?", {"m": "mère", "f": "fille", "0": "aucun",
+                                                    "2": "les deux", "r": "recommencer"}, "r")
+            if qui == "r":
+                continue
+            if qui == "0":
+                axe.liberer()
+                raise SystemExit("  ✗ Aucun mandrin n'a tourné : alimentation du driver, LED rouge, ENA, "
+                                 "câble moteur, DIP. Relancer après correction.")
+            if qui == "2":
+                axe.liberer()
+                raise SystemExit("  ✗ Les deux ont tourné : deux drivers sur le même PUL ou le même câble. "
+                                 "À corriger avant de continuer.")
+            sens = menu("À l'ALLER, dans quel sens est parti ce mandrin (vu côté opérateur) ?",
+                        {"h": "horaire", "a": "antihoraire", "r": "recommencer"}, "r")
+            if sens == "r":
+                continue
+            break
+        axe.liberer()
+        poste = cfg.POSTE_MERE if qui == "m" else cfg.POSTE_FILLE
+        trouve[emplacement] = (poste, 0 if sens == "h" else 1)
 
-    print("\n  Maintenir ROTATION + ou ROTATION − du poste : le mandrin tourne tant que le")
-    print(f"  bouton est tenu. Fin automatique après {ESSAI_INACTIVITE_S:.0f} s sans rotation.\n")
+    reels = [p for p, _ in trouve.values()]
+    if len(set(reels)) != 2:
+        raise SystemExit(f"  ✗ Les deux drivers font tourner le même mandrin ({reels[0]}) : câblage à revoir.")
+    if trouve[cfg.POSTE_MERE][0] != cfg.POSTE_MERE:
+        noter("  ⚠ Drivers INVERSÉS : le driver « mère » de config.py fait tourner la fille.")
+        mere, fille = DRIVERS[cfg.POSTE_FILLE], DRIVERS[cfg.POSTE_MERE]
+        for nom, valeur in (("PUL_MERE", mere["PUL"]), ("DIR_MERE", mere["DIR"]), ("ENA_MERE", mere["ENA"]),
+                            ("PUL_FILLE", fille["PUL"]), ("DIR_FILLE", fille["DIR"]), ("ENA_FILLE", fille["ENA"])):
+            corriger(f"{nom} = {valeur}")
+            setattr(cfg, nom, valeur)
+    else:
+        noter("  ✓ Driver « mère » → mandrin mère, driver « fille » → mandrin fille.")
+
+    for poste, niveau in trouve.values():
+        actuel = cfg.DIR_VERS_HORAIRE[poste]
+        if niveau == actuel:
+            noter(f"  ✓ {poste} : sens de rotation conforme (DIR vers horaire = {niveau})")
+        else:
+            noter(f"  ⚠ {poste} : sens de rotation INVERSÉ")
+            cfg.DIR_VERS_HORAIRE[poste] = niveau
+            cfg.DIR_VERS_ANTIHORAIRE[poste] = 1 - niveau
+    if any(niveau != DIR_ORIGINE[poste] for poste, niveau in cfg.DIR_VERS_HORAIRE.items()):
+        corriger(f"DIR_VERS_HORAIRE = {{POSTE_MERE: {cfg.DIR_VERS_HORAIRE[cfg.POSTE_MERE]}, "
+                 f"POSTE_FILLE: {cfg.DIR_VERS_HORAIRE[cfg.POSTE_FILLE]}}}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  ÉTAPE 2 — BUTÉES
+# ═══════════════════════════════════════════════════════════════════════════
+
+def construire_axes() -> None:
+    """Les deux moteurs, avec la correspondance (corrigée ou non) de config.py."""
+    for poste, (pul, dir_, ena) in ((cfg.POSTE_MERE, (cfg.PUL_MERE, cfg.DIR_MERE, cfg.ENA_MERE)),
+                                    (cfg.POSTE_FILLE, (cfg.PUL_FILLE, cfg.DIR_FILLE, cfg.ENA_FILLE))):
+        axes[poste] = Axe(poste, materiel.puce, pul, dir_, ena, ports)
+
+
+def etape_butees(noms: tuple) -> None:
+    noter("\n  ÉTAPE 2 — BUTÉES")
+    budget = round((max(cfg.PLAGE_NOMINALE_DEG.values()) * 1.5) * cfg.PAS_PAR_DEGRE)
+    print(f"  Rotation à {BUTEE_VITESSE_DEG_S:.0f}°/s jusqu'à la butée HORAIRE, puis jusqu'à l'ANTIHORAIRE.")
+    print(f"  Borne de sécurité : {budget / cfg.PAS_PAR_DEGRE:.0f}° par trajet.")
+    for poste in noms:
+        if not confirmer(f"Poste {poste.upper()} : lancer la recherche des butées ?"):
+            continue
+        axe = axes[poste]
+        axe.exciter()
+        time.sleep(cfg.MOTEUR_ENA_AVANT_DIR_S)
+        siennes = [(poste, H), (poste, A)]
+        vues = {}
+        for sens in (H, A):
+            niveau = cfg.DIR_VERS_HORAIRE[poste] if sens == H else cfg.DIR_VERS_ANTIHORAIRE[poste]
+            print(f"    {poste} → {sens}…", end="", flush=True)
+            faits, vue, detection = tourner(axe, niveau, budget, BUTEE_VITESSE_DEG_S, siennes)
+            if vue is None:
+                print(" rien")
+                noter(f"  ✗ {poste} : aucune butée vue en tournant {sens} sur {faits / cfg.PAS_PAR_DEGRE:.0f}° "
+                      "— capteur non câblé ou mort, ou mauvais sens de rotation (étape 1)")
+                axe.liberer()
+                raise SystemExit(1)
+            print(f" butée « {vue[1]} » de config.py vue après {detection / cfg.PAS_PAR_DEGRE:.1f}°")
+            vues[sens] = (vue[1], detection)
+            time.sleep(0.5)
+        axe.liberer()
+        if vues[H][0] == H and vues[A][0] == A:
+            noter(f"  ✓ {poste} : butées conformes ; plage ≈ {vues[A][1] / cfg.PAS_PAR_DEGRE:.1f}° "
+                  "(mesure fine à l'étape 3)")
+        elif vues[H][0] == A and vues[A][0] == H:
+            noter(f"  ⚠ {poste} : butées INVERSÉES dans config.py")
+            constante_h, constante_a = f"CAP_{poste.upper()}_HORAIRE", f"CAP_{poste.upper()}_ANTIHORAIRE"
+            bit_h, bit_a = getattr(cfg, constante_h), getattr(cfg, constante_a)
+            corriger(f"{constante_h} = {bit_a}")
+            corriger(f"{constante_a} = {bit_h}")
+            setattr(cfg, constante_h, bit_a)
+            setattr(cfg, constante_a, bit_h)
+            E.CABLAGE_BUTEES[(poste, H)], E.CABLAGE_BUTEES[(poste, A)] = bit_a, bit_h
+        else:
+            noter(f"  ✗ {poste} : la MÊME butée vue dans les deux sens ({vues[H][0]}) — câblage à revoir (test_3)")
+            raise SystemExit(1)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  ÉTAPE 3 — REMISE À ZÉRO ET COURSE TOTALE
+# ═══════════════════════════════════════════════════════════════════════════
+
+def etape_remise_a_zero(noms: tuple, mesures: int | None = None) -> None:
+    """`mesures` None : demandé à l'opérateur. Sinon : initialisation seule (étape 4 directe)."""
+    noter("\n  ÉTAPE 3 — REMISE À ZÉRO ET COURSE TOTALE")
+    if not confirmer(f"Lancer l'initialisation réelle ({', '.join(noms)}) ?"):
+        return
+    if mesures is None:
+        mesures = nombre("Nombre de mesures", MESURES_PAR_DEFAUT)
+    # Plage encore inconnue : tolérance (D9) et budget élargis pour ce test seulement.
+    cfg.PLAGE_TOLERANCE_PAS = max(cfg.PLAGE_TOLERANCE_PAS, round(0.9 * min(cfg.PLAGE_NOMINALE_PAS.values())))
+    for poste in noms:
+        cfg.BUDGET_RECHERCHE_RAPIDE_PAS[poste] = round(cfg.BUDGET_RECHERCHE_RAPIDE_PAS[poste] * 1.5)
+    # Le VRAI code des postes, avec nos entrées et nos axes (corrections des étapes 1 et 2).
+    postes_p = {nom: Poste(nom, axes[nom], entrees, _commun.CompteursMuets(), buzzer) for nom in noms}
+    postes.update(postes_p)
+    plages = {poste: [] for poste in noms}
+    for numero in range(1, mesures + 1):
+        duree = _commun.initialiser(entrees, postes_p, buzzer)
+        for poste, p in postes_p.items():
+            ecarts = []
+            for sens in (A, H):
+                rapide = p.detection_rapide.get(sens)
+                signe = 1 if sens == H else -1
+                ecarts.append("départ sur butée" if rapide is None else
+                              f"{signe * (rapide - p.repere_lent[sens]) / cfg.PAS_PAR_DEGRE:+.2f}°")
+            plages[poste].append(p.plage)
+            noter(f"  ✓ mesure {numero} {poste:5s} : plage {p.plage} pas = {p.degres(p.plage)}, écart "
+                  f"rapide/lente A {ecarts[0]}  H {ecarts[1]}  ({duree:.1f} s)")
+    for poste, liste in plages.items():
+        moyenne = sum(liste) / len(liste)
+        dispersion = (max(liste) - min(liste)) / cfg.PAS_PAR_DEGRE
+        noter(f"  {poste} : plage moyenne {moyenne / cfg.PAS_PAR_DEGRE:.1f}°, dispersion {dispersion:.2f}°")
+        if dispersion > cfg.ECART_RECALAGE_MAX_DEG:
+            noter("    ⚠ dispersion importante : perte de pas, jeu mécanique ou galet. À comprendre.")
+        if abs(moyenne / cfg.PAS_PAR_DEGRE - cfg.PLAGE_NOMINALE_DEG[poste]) > 0.5:
+            corriger(f"PLAGE_NOMINALE_DEG[{poste}] = {moyenne / cfg.PAS_PAR_DEGRE:.1f}   "
+                     f"(actuellement {cfg.PLAGE_NOMINALE_DEG[poste]:.1f})")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  ÉTAPE 4 — BOUTONS ROTATION
+# ═══════════════════════════════════════════════════════════════════════════
+
+def etape_boutons(noms: tuple) -> None:
+    noter("\n  ÉTAPE 4 — BOUTONS ROTATION + / −")
+    if not postes or not confirmer("Essayer les boutons ROTATION + / − ?"):
+        return
+    print("  Maintenir ROTATION + ou − : le mandrin tourne tant que le bouton est tenu.")
+    print(f"  Fin automatique après {ESSAI_INACTIVITE_S:.0f} s sans rotation.\n")
     derniere_activite = time.monotonic()
     while time.monotonic() - derniere_activite < ESSAI_INACTIVITE_S:
-        try:
-            maintenant = time.monotonic()
-            if poste.etat == ROTATION:
-                derniere_activite = maintenant
-            entrees.rafraichir(maintenant)
+        maintenant = time.monotonic()
+        entrees.rafraichir(maintenant)
+        affichage = []
+        for nom, poste in postes.items():
             for action in (ROTATION_PLUS, ROTATION_MOINS):
                 if entrees.appui(f"{action}_{nom}"):
                     motif = poste.refus(action, maintenant)
                     if motif:
-                        buzzer.bip_refus()
-                        print(f"\n    refusé : {motif}")
+                        print(f"\n    {nom} : refusé — {motif}")
                     else:
                         poste.lancer(action, maintenant)
             poste.avancer(maintenant)
             buzzer.avancer(maintenant)
-            vitesse = "tourne " if poste.etat == ROTATION else "arrêté "
-            print(f"\r    {vitesse} position {poste.degres(poste.position):>7s} "
-                  f"/ {poste.degres(poste.plage)}   butées A {voyant(butees[A].stable)} "
-                  f"H {voyant(butees[H].stable)}   retard max {axe.retard_max_s * 1000:4.1f} ms",
-                  end="", flush=True)
-            time.sleep(cfg.PERIODE_BOUCLE_S)
-        except KeyboardInterrupt:
-            break
-    _commun.arreter_postes(postes)
-    plus = cfg.SENS_ROTATION_PLUS[nom]
-    print(f"\n\n  ROTATION + est réglé vers {plus.upper()} (SENS_ROTATION_PLUS[{nom}]).")
-    if not confirmer("ROTATION + tourne-t-il dans le sens voulu par l'opérateur ?"):
-        print("    → dans config.py, SENS_ROTATION_PLUS : mettre "
-              + ("SENS_ANTIHORAIRE" if plus == H else "SENS_HORAIRE") + f" pour {nom}.")
+            if poste.etat == ROTATION:
+                derniere_activite = maintenant
+            affichage.append(f"{nom} {poste.degres(poste.position):>7s} "
+                             f"A{voyant(entrees.butee(nom, A).stable)} H{voyant(entrees.butee(nom, H).stable)}")
+        print("\r    " + "    ".join(affichage), end="", flush=True)
+        time.sleep(cfg.PERIODE_BOUCLE_S)
+    print()
+    for nom in postes:
+        plus = cfg.SENS_ROTATION_PLUS[nom]
+        if confirmer(f"{nom.upper()} : ROTATION + tourne vers {plus.upper()} — est-ce le sens voulu ?"):
+            noter(f"  ✓ {nom} : ROTATION + vers {plus}")
+        else:
+            autre = A if plus == H else H
+            noter(f"  ⚠ {nom} : ROTATION + à inverser")
+            cfg.SENS_ROTATION_PLUS[nom] = autre
+    if cfg.SENS_ROTATION_PLUS != SENS_PLUS_ORIGINE:
+        corriger("SENS_ROTATION_PLUS = {POSTE_MERE: SENS_" + cfg.SENS_ROTATION_PLUS[cfg.POSTE_MERE].upper()
+                 + ", POSTE_FILLE: SENS_" + cfg.SENS_ROTATION_PLUS[cfg.POSTE_FILLE].upper() + "}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+
+DIR_ORIGINE = dict(cfg.DIR_VERS_HORAIRE)
+SENS_PLUS_ORIGINE = dict(cfg.SENS_ROTATION_PLUS)
+try:
+    depart = menu("Commencer à quelle étape ?", {"1": "identification des moteurs et sens",
+                                                 "2": "butées", "3": "remise à zéro et course totale",
+                                                 "4": "boutons ROTATION"}, "1")
+    noms = _commun.choisir_postes("Postes pour les étapes 2 à 4 ?") if depart != "1" else None
+    if depart == "1":
+        etape_identification()
+        noms = _commun.choisir_postes("Postes pour les étapes 2 à 4 ?")
+    construire_axes()
+    if depart in ("1", "2"):
+        etape_butees(noms)
+    etape_remise_a_zero(noms, None if depart != "4" else 1)
+    etape_boutons(noms)
 except Defaut as defaut:
-    print(f"\n  ✗ DÉFAUT {defaut.code} : {defaut.detail}")
+    noter(f"\n  ✗ DÉFAUT {defaut.code} : {defaut.detail}")
 except (TimeoutError, RuntimeError) as erreur:
-    print(f"\n  ✗ {erreur}")
+    noter(f"\n  ✗ {erreur}")
+except SystemExit as sortie:
+    if sortie.code not in (None, 0, 1):
+        noter(str(sortie.code))
 except KeyboardInterrupt:
-    print("\n  Interrompu.")
+    noter("\n  Interrompu.")
 finally:
     _commun.arreter_postes(postes)
+    for axe in axes.values():
+        axe.demander_arret()
+        axe.attendre_fin(cfg.ARRET_THREAD_MAX_S)
     materiel.fermer()
-    print("  Moteur arrêté et libre, relais à 0.\n")
+    print("\n  ┌─ RÉCAPITULATIF À M'ENVOYER " + "─" * 46)
+    for ligne in journal[1:]:
+        if ligne.strip():
+            print("  │ " + ligne.strip())
+    print("  │")
+    print("  │ À recopier dans config.py :" + ("" if corrections else " rien, tout est conforme."))
+    for ligne in corrections:
+        print("  │ " + ligne)
+    print("  └" + "─" * 73)
+    _commun.enregistrer(FICHIER, journal + ["", "À recopier dans config.py :"] + corrections)
+    print(f"  Enregistré dans : {FICHIER}")
+    print("  Moteurs arrêtés et libres, relais à 0.\n")

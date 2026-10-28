@@ -7,9 +7,10 @@ le programme se termine tout seul (dans le terminal de Geany, Ctrl+C ferme la
 fenêtre et le résultat est perdu). Chaque résultat est aussi ENREGISTRÉ dans
 logs/boutons_<date>_<heure>.txt.
 
-    python3 tests/test_2_boutons.py                 VALIDATION (par défaut)
-    python3 tests/test_2_boutons.py --attribution   refaire la correspondance
-    python3 tests/test_2_boutons.py --apercu        voyants en direct
+Lancer depuis Geany (F5). Un menu propose :
+    1 = VALIDATION de config.py (par défaut)
+    2 = ATTRIBUTION : refaire la correspondance
+    3 = APERÇU : voyants en direct
 
 VALIDATION — vérifie que config.py correspond au câblage
   Le programme nomme les 9 boutons un par un. Pour chacun : appuyer, puis
@@ -24,11 +25,11 @@ ATTRIBUTION — à refaire seulement si le câblage change
   et note celui qui quitte son niveau de repos (contact NO ou NF). À la fin :
   les lignes BTN_* à recopier dans config.py.
 
-APERÇU (--apercu) : un voyant et un compteur par bouton. Arrêt automatique
+APERÇU : un voyant et un compteur par bouton. Arrêt automatique
 après APERCU_INACTIVITE_S sans aucun appui, puis bilan.
 """
 
-import sys
+
 import time
 from pathlib import Path
 
@@ -186,7 +187,7 @@ def mode_validation(materiel) -> None:
     if all(bon for bon, _ in resultats.values()) and not au_repos_appuyes:
         lignes.append("│ TOUT EST BON : config.py correspond au câblage des 9 boutons.")
     else:
-        lignes.append("│ ✗ À CORRIGER — relancer avec --attribution si le câblage a changé.")
+        lignes.append("│ ✗ À CORRIGER — relancer et choisir ATTRIBUTION si le câblage a changé.")
     lignes.append("└" + "─" * 78)
     terminer(lignes)
 
@@ -335,12 +336,9 @@ def mode_apercu(materiel) -> None:
 titre("TEST 2 — BOUTONS")
 materiel = _commun.ouvrir_lecture_seule()
 try:
-    if "--apercu" in sys.argv:
-        mode_apercu(materiel)
-    elif "--attribution" in sys.argv:
-        mode_attribution(materiel)
-    else:
-        mode_validation(materiel)
+    mode = _commun.menu("Que faire ?", {"1": "VALIDATION de config.py", "2": "ATTRIBUTION (le câblage a changé)",
+                                         "3": "APERÇU en direct"}, "1")
+    {"1": mode_validation, "2": mode_attribution, "3": mode_apercu}[mode](materiel)
 except KeyboardInterrupt:
     print("\n  Abandonné.")
 finally:

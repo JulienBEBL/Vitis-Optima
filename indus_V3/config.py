@@ -43,7 +43,7 @@ Seuls les drivers 1 (poste mère) et 2 (poste fille) sont utilisés.
                   DIR_VERS_HORAIRE ..... sens de rotation par poste      (test_5)
                   SENS_ROTATION_PLUS ... sens du bouton ROTATION +       (test_5)
   ⚠ À CONFIRMER   DIP des drivers (6400 pas/tr, 4,28 A RMS) — LIRE L'ÉTIQUETTE
-  ⚠ À MESURER     PLAGE_NOMINALE_DEG (test_6), MARGE_DEPASSEMENT_DEG (tuyau)
+  ⚠ À MESURER     PLAGE_NOMINALE_DEG (test_5), MARGE_DEPASSEMENT_DEG (tuyau)
   ⚠ À AJUSTER     vitesses et rampe de rotation, vitesses d'initialisation,
                   temporisations pneumatiques
 """
@@ -284,7 +284,7 @@ PAS_PAR_DEGRE = DRIVER_PAS_PAR_TOUR / 360.0
 
 # Plage de rotation butée ANTIHORAIRE ↔ butée HORAIRE attendue, par poste.
 # Mesurée à chaque initialisation ; la valeur mesurée est comparée à celle-ci.
-# ⚠ À MESURER (test_6_course.py) — à reprendre à chaque déplacement d'un capteur.
+# ⚠ À MESURER (test_5_moteur.py, étape 3) — à reprendre à chaque déplacement d'un capteur.
 PLAGE_NOMINALE_DEG = {POSTE_MERE: 130.0, POSTE_FILLE: 130.0}
 
 # Écart toléré entre plage mesurée et plage nominale. Au-delà → défaut D9.

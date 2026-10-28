@@ -213,3 +213,27 @@ def enregistrer(chemin, lignes: list) -> None:
         chemin.write_text("\n".join(lignes) + "\n", encoding="utf-8")
     except OSError as erreur:
         print(f"  (résultat non enregistré : {erreur})")
+
+
+def menu(texte: str, choix: dict, defaut: str) -> str:
+    """Menu au clavier (les scripts sont lancés depuis Geany, sans option en ligne
+    de commande). `choix` : touche → libellé. Entrée seule = `defaut`."""
+    print(f"\n  {texte}")
+    for touche, libelle in choix.items():
+        print(f"    {touche} = {libelle}{'   (par défaut)' if touche == defaut else ''}")
+    while True:
+        reponse = input("  > ").strip().lower() or defaut
+        if reponse in choix:
+            return reponse
+        print("    choix inconnu : " + ", ".join(choix))
+
+
+def choisir_postes(texte: str = "Poste(s) à tester ?") -> tuple:
+    """m, f ou les deux. Renvoie le tuple des noms de postes."""
+    reponse = menu(texte, {"m": "mère", "f": "fille", "2": "les deux"}, "2")
+    return {"m": (cfg.POSTE_MERE,), "f": (cfg.POSTE_FILLE,)}.get(reponse, cfg.POSTES)
+
+
+def nombre(texte: str, defaut: int) -> int:
+    reponse = input(f"\n  {texte} [{defaut}] ? ").strip()
+    return int(reponse) if reponse.isdigit() and int(reponse) > 0 else defaut
