@@ -191,13 +191,13 @@ ANTI_REBOND_BOUTON_S = 0.05
 # Les 4 sur le MÊME port, volontairement : un seul octet lu, donc les quatre
 # bits datent du même instant — le contrôle « deux butées actives » (D2) porte
 # sur une photo cohérente.
-# ⚠ ATTRIBUTION À REFAIRE (test_3_capteurs.py) : les capteurs ont été déplacés
-#   sur la rotation. Valeurs de départ = fils relevés en V2.
+# Greffon (fille) : relevé sur machine le 2026-10-28 (test_3, attribution), contacts NO.
+# Mère : butées pas encore branchées — bits restants, PROVISOIRES.
 
-CAP_MERE_ANTIHORAIRE = 4     # GPB4   ⚠ à attribuer (ancien « mère coupe »)
-CAP_MERE_HORAIRE = 1         # GPB1   ⚠ à attribuer (ancien « mère ligaturage »)
-CAP_FILLE_ANTIHORAIRE = 2    # GPB2   ⚠ à attribuer (ancien « fille coupe »)
-CAP_FILLE_HORAIRE = 3        # GPB3   ⚠ à attribuer (ancien « fille ligaturage »)
+CAP_FILLE_HORAIRE = 1        # GPB1   relevé le 2026-10-28
+CAP_FILLE_ANTIHORAIRE = 4    # GPB4   relevé le 2026-10-28
+CAP_MERE_HORAIRE = 2         # GPB2   ⚠ provisoire, à attribuer au branchement (test_3)
+CAP_MERE_ANTIHORAIRE = 3     # GPB3   ⚠ provisoire, à attribuer au branchement (test_3)
 
 # Contact NO + pull-up : galet actionné = contact fermé = niveau BAS.
 # Fil coupé ou connecteur débranché = niveau HAUT = « pas en butée » :
