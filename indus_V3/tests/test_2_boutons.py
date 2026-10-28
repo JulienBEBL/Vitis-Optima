@@ -47,9 +47,11 @@ PORT_ATTENDU = {nom: tuple(source.split("_")) for nom, (source, _) in CABLAGE_BO
 
 
 def mode_direct(materiel) -> None:
-    print("  Appuyer une fois sur chaque bouton. Ctrl+C pour le bilan.\n")
-    print("  " + "  ".join(f"{ABREGES[n]:>6}" for n in NOMS_BOUTONS)
-          + "   0x24 B      0x26 A      0x26 B")
+    # Ligne tenue sous 80 caractères : plus large, le terminal de Geany la coupe
+    # en deux et le retour chariot réécrit une ligne de plus à chaque tour.
+    print("  Appuyer une fois sur chaque bouton. Ctrl+C pour le bilan.")
+    print("  Octets bruts en hexadécimal (FF = rien d'appuyé).\n")
+    print("  " + "".join(f"{ABREGES[n]:>6}" for n in NOMS_BOUTONS) + "   24B 26A 26B")
     entrees = Entrees(materiel.relais, materiel.entrees)
     appuis = {nom: 0 for nom in NOMS_BOUTONS}
     try:
@@ -60,9 +62,8 @@ def mode_direct(materiel) -> None:
                 if entrees.appui(nom):
                     appuis[nom] += 1
                 ligne.append(f"{voyant(entrees.boutons[nom].stable)}{appuis[nom]:>3}")
-            print("\r  " + "  ".join(f"{c:>6}" for c in ligne)
-                  + f"   {bits(entrees.octets['0x24_B'])}   {bits(entrees.octets['0x26_A'])}"
-                  + f"   {bits(entrees.octets['0x26_B'])}", end="", flush=True)
+            octets = "  ".join(f"{entrees.octets[cle]:02X}" for cle in ("0x24_B", "0x26_A", "0x26_B"))
+            print("\r  " + "".join(f"{c:>6}" for c in ligne) + f"    {octets}", end="", flush=True)
             time.sleep(cfg.PERIODE_BOUCLE_S)
     except KeyboardInterrupt:
         print("\n\n  Bilan :")
@@ -74,19 +75,25 @@ def mode_direct(materiel) -> None:
 
 def mode_attribution(materiel) -> None:
     # Un filtre par bit brut des trois ports d'entrée : (mcp, port, bit) → Filtre.
+    # Un appui = le bit QUITTE son niveau de repos (relevé au lancement) : un
+    # bouton câblé en NF, à 0 au repos, est donc trouvé aussi, et signalé.
     filtres = {(mcp, port, bit): Filtre(cfg.ANTI_REBOND_BOUTON_S)
                for mcp, port in (("0x24", "B"), ("0x26", "A"), ("0x26", "B")) for bit in range(8)}
 
+    def lire_octets() -> dict:
+        a26, b26 = materiel.entrees.lire_ports()
+        return {("0x24", "B"): materiel.relais.lire_port(PORT_B), ("0x26", "A"): a26, ("0x26", "B"): b26}
+
+    repos = lire_octets()
+
     def lire() -> list:
         """Rafraîchit tous les filtres ; renvoie les (mcp, port, bit) qui viennent d'être appuyés."""
-        a26, b26 = materiel.entrees.lire_ports()
-        octets = {("0x24", "B"): materiel.relais.lire_port(PORT_B),
-                  ("0x26", "A"): a26, ("0x26", "B"): b26}
+        octets = lire_octets()
         maintenant = time.monotonic()
         fronts = []
         for (mcp, port, bit), filtre in filtres.items():
-            niveau_haut = bool(octets[(mcp, port)] & (1 << bit))
-            filtre.maj(not niveau_haut if cfg.BOUTONS_ACTIFS_BAS else niveau_haut, maintenant)
+            masque = 1 << bit
+            filtre.maj((octets[(mcp, port)] & masque) != (repos[(mcp, port)] & masque), maintenant)
             if filtre.front:
                 fronts.append((mcp, port, bit))
         return fronts
@@ -94,6 +101,12 @@ def mode_attribution(materiel) -> None:
     def texte(cle) -> str:
         return f"{cle[0]} GP{cle[1]}{cle[2]}"
 
+    print("  Au repos : " + "   ".join(f"{m} {p} = {bits(o)}" for (m, p), o in repos.items()))
+    a_zero = [(m, p, b) for (m, p), o in repos.items() for b in range(8) if not o & (1 << b)]
+    if a_zero:
+        print("  ⚠ Bits à 0 AU REPOS : " + ", ".join(texte(c) for c in a_zero))
+        print("    Sur le 0x26 port B, ce peut être une fin de course actionnée. Sinon : un bouton")
+        print("    enfoncé au lancement (relâcher et relancer), ou câblé en NF (contact à passer en NO).\n")
     print("  Pour chaque fonction annoncée, appuyer sur le bouton voulu.")
     print("  ⚠ Les fins de course du 0x26 port B sont aussi écoutées : ne pas les actionner.")
     print("  Ctrl+C pour abandonner.\n")
@@ -131,6 +144,10 @@ def mode_attribution(materiel) -> None:
             mcp, port = PORT_ATTENDU[nom]
             print(f"      {LIBELLES[nom]} est sur {texte(attribution[nom])}, attendu sur le {mcp} port {port}")
         print("    → me le signaler : il faut adapter libs/entrees.py, pas seulement config.py.")
+    nf = [nom for nom in NOMS_BOUTONS if attribution[nom] in a_zero]
+    if nf:
+        print("\n  ⚠ Boutons à 0 au repos (contact NF ?) : " + ", ".join(LIBELLES[n] for n in nf))
+        print("    Le programme attend des contacts NO (appui = 0) : passer ces fils sur la borne NO.")
     print()
 
 
