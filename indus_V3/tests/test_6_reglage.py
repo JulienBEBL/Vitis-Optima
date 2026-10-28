@@ -93,7 +93,7 @@ entrees, postes, buzzer = _commun.construire_postes(materiel, noms)
 
 def reinitialiser(liste: list) -> None:
     """Réinitialise les postes donnés (après un raté : la position n'est plus sûre)."""
-    _commun.arreter_postes({n: postes[n] for n in liste})
+    _commun.arreter_postes({n: postes[n] for n in liste}, liberer=False)
     _commun.initialiser(entrees, {n: postes[n] for n in liste}, buzzer)
 
 
@@ -114,7 +114,7 @@ def trajet(sens: str) -> dict:
         except Defaut as defaut:
             fautif = next((n for n in actifs if defaut.detail.startswith(n)), next(iter(actifs)))
             resultats[fautif] = f"DÉFAUT {defaut.code} : {defaut.detail}"
-            _commun.arreter_postes({fautif: actifs.pop(fautif)})
+            _commun.arreter_postes({fautif: actifs.pop(fautif)}, liberer=False)
             continue
         for nom in [n for n, p in actifs.items() if p.etat == PRET]:
             poste = actifs.pop(nom)

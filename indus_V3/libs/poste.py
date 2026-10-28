@@ -381,7 +381,7 @@ class Poste:
             self._phase = "lente"
             self._demarrer(sens, _SUR_BUTEE, cfg.BUDGET_CONFIRMATION_PAS, (),
                            1.0 / cfg.VITESSE_RECHERCHE_LENTE_SPS,
-                           code_budget="D8", code_inattendu="D8")
+                           code_budget="D8", code_inattendu="D8", quoi="passe lente de confirmation")
         elif self._phase == "lente":
             self.repere_lent[sens] = fin["detection"]
             rapide = self.detection_rapide.get(sens)
@@ -449,7 +449,8 @@ class Poste:
     # ── Mouvement : démarrage, surveillance, fin ──────────────────────────
 
     def _demarrer(self, sens: str, mode: str, budget: int, periodes: tuple, periode_suite: float,
-                  bouton: str | None = None, code_budget: str = "D1", code_inattendu: str = "D5") -> None:
+                  bouton: str | None = None, code_budget: str = "D1", code_inattendu: str = "D5",
+                  quoi: str = "") -> None:
         oppose = cfg.sens_oppose(sens)
         self._mvt = {
             "sens": sens, "mode": mode, "bouton": bouton, "budget": budget,
@@ -457,7 +458,7 @@ class Poste:
             # Butée qu'on quitte : surveillée pour D4 tant qu'elle ne s'est pas relâchée.
             "depart": oppose if (self._butees[oppose].stable or self._butees[oppose].brut) else None,
             "arret_a": None, "raison": None, "detection": None, "relache_a": None,
-            "code_budget": code_budget, "code_inattendu": code_inattendu,
+            "code_budget": code_budget, "code_inattendu": code_inattendu, "quoi": quoi,
         }
         self._repos_ref = None
         self.axe.lancer_vers(sens, budget, periodes, periode_suite)
@@ -503,7 +504,8 @@ class Poste:
                 else:
                     # Le thread s'est arrêté seul : budget épuisé, la butée n'a pas été vue.
                     raise Defaut(m["code_budget"], f"{self.nom} : butée {sens} non vue après "
-                                                   f"{self.axe.pas} pas ({self.degres(self.axe.pas)})")
+                                                   f"{self.axe.pas} pas ({self.degres(self.axe.pas)})"
+                                                   + (f" — {m['quoi']}" if m["quoi"] else ""))
             if m["arret_a"] is None:
                 return None
 

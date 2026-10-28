@@ -98,12 +98,12 @@ def trajet(sens: str) -> dict:
         except Defaut as defaut:
             fautif = _poste_du_defaut(defaut, actifs)
             resultats[fautif] = f"DÉFAUT {defaut.code} : {defaut.detail}"
-            _commun.arreter_postes({fautif: actifs.pop(fautif)})
+            _commun.arreter_postes({fautif: actifs.pop(fautif)}, liberer=False)
             continue
         except TimeoutError as erreur:
             for nom in list(actifs):
                 resultats[nom] = str(erreur)
-            _commun.arreter_postes(actifs)
+            _commun.arreter_postes(actifs, liberer=False)
             break
         for nom in [n for n, p in actifs.items() if p.etat == PRET]:
             poste = actifs.pop(nom)

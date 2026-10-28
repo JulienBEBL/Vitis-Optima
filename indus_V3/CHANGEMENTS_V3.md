@@ -69,6 +69,7 @@ validée avant la suivante.
 | 2026-10-27 | Dépassement possible à l'initialisation (plage nominale + marge) accepté. |
 | 2026-10-27 | LOGIQUE.md V3 validé (version 3.1). |
 | 2026-10-28 | Boutons relevés sur machine : 9 contacts NO, répartis sur 0x24 B, 0x26 A (COUPE mère, ACQUITTEMENT, ROTATION − fille). config.py désigne chaque bouton par (MCP, port, bit). I2C validé (test_1). |
+| 2026-10-28 | Sur machine : D8 en passe lente à 8° (recul 5° + tolérance 3°) → l'hystérésis du galet dépasse 3° : TOLERANCE_CONFIRMATION_DEG passe à 10°. Course du greffon ≈ 282° (et non 130°). Tests : moteurs gardés sous tension jusqu'à la fin (une remise sous tension décale le rotor) ; jamais de mouvement contre une butée déjà active, on repart dans l'autre sens. |
 | 2026-10-28 | test_5 : greffon sur le DRIVER 1 (PUL 17, DIR GPA7, ENA GPB0), DIR vers horaire = 0. Mère sur le driver 2, provisoire (pas encore montée). Bug : la recherche de butée s'arrêtait à 1,5 × la plage nominale (195°) avant la butée → recherche par segments de 45° avec accord de l'opérateur, puis contrôle course comptée / course réelle (détecte un micropas différent). |
 | 2026-10-28 | Butées du greffon relevées (test_3) : HORAIRE = 0x26 GPB1, ANTIHORAIRE = GPB4, contacts NO. Mère provisoire sur GPB2 / GPB3. |
 | 2026-10-28 | SW4 = ON sur les drivers : plein courant à l'arrêt (et non demi-courant comme décidé le 2026-10-27). Surveiller l'échauffement des moteurs, excités en permanence. |

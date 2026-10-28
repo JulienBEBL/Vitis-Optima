@@ -137,6 +137,8 @@ Sur ACQUITTEMENT, depuis ATTENTE_ACQUITTEMENT ou DEFAUT. Les deux postes s'initi
    - **passe lente** de confirmation à `VITESSE_RECHERCHE_LENTE`, sans rampe, arrêt sur la
      butée. Budget : recul + `TOLERANCE_CONFIRMATION_DEG` → sinon **D8**.
      **C'est cet arrêt lent qui fixe la position 0** (ou `plage`).
+     La tolérance couvre l'**hystérésis** du galet (il se relâche avant le point où il
+     s'enclenche) : 10°, après un D8 sur machine avec 3°.
 4. **Seconde butée**, sens opposé, mêmes trois temps. La position de l'arrêt lent **est la
    plage mesurée**.
 5. **Contrôle de la plage** : écart à `PLAGE_NOMINALE_DEG` supérieur à

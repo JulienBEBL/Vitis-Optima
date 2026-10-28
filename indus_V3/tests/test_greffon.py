@@ -175,12 +175,16 @@ def appliquer_butees(bit_h: int, bit_a: int, origine: str) -> None:
 #  ÉTAPE 2 — MOTEUR
 # ═══════════════════════════════════════════════════════════════════════════
 
-def tourner(axe: Axe, niveau_dir: int, pas: int, vitesse_deg_s: float) -> tuple:
+def tourner(axe: Axe, niveau_dir: int, pas: int, vitesse_deg_s: float, cible: str | None = None) -> tuple:
     """Rotation à vitesse constante (après la rampe), arrêt au budget ou sur la
-    première butée du greffon qui s'active. Renvoie (pas faits, butée vue, pas à la détection)."""
+    première butée du greffon qui s'active. `cible` : sens de la butée visée ;
+    déjà active au départ → aucun mouvement (jamais contre la butée).
+    Renvoie (pas faits, butée vue, pas à la détection)."""
     vitesse = vitesse_deg_s * cfg.PAS_PAR_DEGRE
     lire_stable()
     actives = {cle for cle in butees_greffon() if entrees.butees[cle].stable}
+    if cible is not None and (POSTE, cible) in actives:
+        return 0, cible, 0
     axe.lancer_niveau(niveau_dir, pas, periodes_rampe(vitesse), 1.0 / vitesse)
     vue, detection = None, None
     try:
@@ -212,6 +216,19 @@ def construire_axe() -> Axe:
     return Axe(POSTE, materiel.puce, d["PUL"], d["DIR"], d["ENA"], ports)
 
 
+def niveau_aller(emplacement: str) -> int:
+    """Niveau de DIR de l'aller d'identification. Mandrin en butée au départ : on
+    part dans le sens qui s'en ÉLOIGNE, selon config.py (jamais contre la butée)."""
+    lire_stable()
+    if entrees.butee(POSTE, H).stable:
+        print("    départ sur la butée horaire : l'aller part vers antihoraire")
+        return cfg.DIR_VERS_ANTIHORAIRE[emplacement]
+    if entrees.butee(POSTE, A).stable:
+        print("    départ sur la butée antihoraire : l'aller part vers horaire")
+        return cfg.DIR_VERS_HORAIRE[emplacement]
+    return 0
+
+
 def etape_moteur() -> None:
     noter("\n  ÉTAPE 2 — MOTEUR")
     print(f"  Le moteur va faire un aller-retour de {IDENT_DEG:.0f}° à {IDENT_VITESSE_DEG_S:.0f}°/s "
@@ -227,12 +244,13 @@ def etape_moteur() -> None:
         while True:
             print(f"\n  Driver « {emplacement} » de config.py (PUL {d['PUL']}, DIR GPA{d['DIR']}, "
                   f"ENA GPB{d['ENA']}) : aller…", flush=True)
-            faits, vue, _ = tourner(axe, 0, pas, IDENT_VITESSE_DEG_S)
+            aller = niveau_aller(emplacement)
+            faits, vue, _ = tourner(axe, aller, pas, IDENT_VITESSE_DEG_S)
             if vue:
                 print(f"    (arrêt sur la butée {vue})")
             time.sleep(0.5)
             print("    …retour", flush=True)
-            tourner(axe, 1, faits, IDENT_VITESSE_DEG_S)
+            tourner(axe, 1 - aller, faits, IDENT_VITESSE_DEG_S)
             reponse = menu("Le moteur du greffon a-t-il tourné ?", {"o": "oui", "n": "non", "r": "recommencer"}, "r")
             if reponse != "r":
                 break
@@ -241,7 +259,6 @@ def etape_moteur() -> None:
             continue
         sens = menu("À l'ALLER, dans quel sens est parti le mandrin (vu côté opérateur) ?",
                     {"h": "horaire", "a": "antihoraire"}, "h")
-        axe.liberer()
         if emplacement != POSTE:
             noter(f"  ⚠ Le greffon est branché sur le driver « {emplacement} » de config.py : drivers à échanger")
             moi, autre = driver(AUTRE), driver(POSTE)
@@ -252,7 +269,7 @@ def etape_moteur() -> None:
                 corriger(nom, f"{nom} = {valeur}")
         else:
             noter(f"  ✓ Le greffon est sur le driver « {POSTE} » de config.py (PUL {d['PUL']})")
-        niveau = 0 if sens == "h" else 1
+        niveau = aller if sens == "h" else 1 - aller
         if niveau == cfg.DIR_VERS_HORAIRE[POSTE]:
             noter(f"  ✓ sens de rotation conforme (DIR vers horaire = {niveau})")
         else:
@@ -286,7 +303,7 @@ def etape_butees_moteur() -> None:
         niveau = (cfg.DIR_VERS_HORAIRE if sens == H else cfg.DIR_VERS_ANTIHORAIRE)[POSTE]
         print(f"    → {sens}…", end="", flush=True)
         vue, detection = _commun.chercher_butee(
-            lambda pas, n=niveau: tourner(axe, n, pas, BUTEE_VITESSE_DEG_S), sens)
+            lambda pas, n=niveau, c=sens: tourner(axe, n, pas, BUTEE_VITESSE_DEG_S, c), sens)
         if vue is None:
             noter(f"  ✗ aucune butée vue en tournant {sens} sur {detection / cfg.PAS_PAR_DEGRE:.0f}° — capteur "
                   "débranché ou mort, ou sens de rotation faux (étape 2)")

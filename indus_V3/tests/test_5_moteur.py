@@ -96,12 +96,17 @@ def lire_butees() -> dict:
     return {cle: filtre.stable for cle, filtre in entrees.butees.items()}
 
 
-def tourner(axe: Axe, niveau_dir: int, pas: int, vitesse_deg_s: float, surveiller: list) -> tuple:
+def tourner(axe: Axe, niveau_dir: int, pas: int, vitesse_deg_s: float, surveiller: list,
+            cible=None) -> tuple:
     """Rotation à vitesse constante (après la rampe), arrêt au budget ou sur la
     première butée de `surveiller` qui s'active (si elle n'était pas déjà active).
+    `cible` : butée visée ; déjà active au départ → aucun mouvement (on ne pousse
+    jamais un mandrin contre sa butée).
     Renvoie (pas faits, butée vue ou None, pas à la détection)."""
     vitesse = vitesse_deg_s * cfg.PAS_PAR_DEGRE
     actives = {cle for cle, actif in lire_butees().items() if actif}
+    if cible is not None and cible in actives:
+        return 0, cible, 0
     axe.lancer_niveau(niveau_dir, pas, periodes_rampe(vitesse), 1.0 / vitesse)
     vue, detection = None, None
     try:
@@ -127,6 +132,19 @@ def tourner(axe: Axe, niveau_dir: int, pas: int, vitesse_deg_s: float, surveille
 #  ÉTAPE 1 — QUEL MOTEUR EST QUI
 # ═══════════════════════════════════════════════════════════════════════════
 
+def niveau_aller(emplacement: str) -> int:
+    """Niveau de DIR de l'aller d'identification. Mandrin en butée au départ : on
+    part dans le sens qui s'en ÉLOIGNE, selon config.py (jamais contre la butée)."""
+    etat = lire_butees()
+    if etat[(emplacement, cfg.SENS_HORAIRE)]:
+        print(f"    départ sur la butée horaire de {emplacement} : l'aller part vers antihoraire")
+        return cfg.DIR_VERS_ANTIHORAIRE[emplacement]
+    if etat[(emplacement, cfg.SENS_ANTIHORAIRE)]:
+        print(f"    départ sur la butée antihoraire de {emplacement} : l'aller part vers horaire")
+        return cfg.DIR_VERS_HORAIRE[emplacement]
+    return 0
+
+
 def etape_identification() -> None:
     noter("\n  ÉTAPE 1 — QUEL MOTEUR EST QUI")
     print(f"  Chaque moteur va faire un aller-retour de {IDENT_DEG:.0f}° à {IDENT_VITESSE_DEG_S:.0f}°/s.")
@@ -141,14 +159,15 @@ def etape_identification() -> None:
         time.sleep(cfg.MOTEUR_ENA_AVANT_DIR_S)
         pas = round(IDENT_DEG * cfg.PAS_PAR_DEGRE)
         while True:
+            aller = niveau_aller(emplacement)
             print(f"\n  Driver « {emplacement} » de config.py (PUL {broches['PUL']}, DIR GPA{broches['DIR']}, "
                   f"ENA GPB{broches['ENA']}) : aller…", flush=True)
-            faits, vue, _ = tourner(axe, 0, pas, IDENT_VITESSE_DEG_S, toutes_butees)
+            faits, vue, _ = tourner(axe, aller, pas, IDENT_VITESSE_DEG_S, toutes_butees)
             if vue:
                 print(f"    (arrêt sur la butée {vue[1]} de {vue[0]})")
             time.sleep(0.5)
             print("    …retour", flush=True)
-            tourner(axe, 1, faits, IDENT_VITESSE_DEG_S, [])
+            tourner(axe, 1 - aller, faits, IDENT_VITESSE_DEG_S, [])
             qui = menu("Quel mandrin a tourné ?", {"m": "mère", "f": "fille", "0": "aucun",
                                                     "2": "les deux", "r": "recommencer"}, "r")
             if qui == "r":
@@ -164,13 +183,12 @@ def etape_identification() -> None:
             if sens == "r":
                 continue
             break
-        axe.liberer()
         if qui == "0":
             # Montage partiel : un seul moteur branché. Accepté, ce driver est simplement ignoré.
             noter(f"  · driver « {emplacement} » : aucun mandrin n'a tourné (moteur non branché ?)")
             continue
         poste = cfg.POSTE_MERE if qui == "m" else cfg.POSTE_FILLE
-        trouve[emplacement] = (poste, 0 if sens == "h" else 1)
+        trouve[emplacement] = (poste, aller if sens == "h" else 1 - aller)
 
     reels = [p for p, _ in trouve.values()]
     if not reels:
@@ -230,16 +248,15 @@ def etape_butees(noms: tuple) -> None:
             niveau = cfg.DIR_VERS_HORAIRE[poste] if sens == H else cfg.DIR_VERS_ANTIHORAIRE[poste]
             print(f"    {poste} → {sens}…", end="", flush=True)
             vue, detection = _commun.chercher_butee(
-                lambda pas, n=niveau: tourner(axe, n, pas, BUTEE_VITESSE_DEG_S, siennes), sens)
+                lambda pas, n=niveau, c=(poste, sens): tourner(axe, n, pas, BUTEE_VITESSE_DEG_S, siennes, c),
+                sens)
             if vue is None:
                 noter(f"  ✗ {poste} : aucune butée vue en tournant {sens} sur {detection / cfg.PAS_PAR_DEGRE:.0f}° "
                       "— capteur non câblé ou mort, ou mauvais sens de rotation (étape 1)")
-                axe.liberer()
                 raise SystemExit(1)
             print(f" butée « {vue[1]} » de config.py vue après {detection / cfg.PAS_PAR_DEGRE:.1f}°")
             vues[sens] = (vue[1], detection)
             time.sleep(0.5)
-        axe.liberer()
         _commun.controler_course(poste, vues[A][1], noter, corriger)
         if vues[H][0] == H and vues[A][0] == A:
             noter(f"  ✓ {poste} : butées conformes ; plage ≈ {vues[A][1] / cfg.PAS_PAR_DEGRE:.1f}° "

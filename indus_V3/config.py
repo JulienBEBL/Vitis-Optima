@@ -354,8 +354,11 @@ VITESSE_RECHERCHE_RAPIDE_DEG_S = 20.0   # ⚠ À AJUSTER — les deux moteurs en
                                         # surveiller le « retard max » du journal aux essais
 VITESSE_RECHERCHE_LENTE_DEG_S = 3.0     # ⚠ À AJUSTER — arrêt en moins de 0,03° sur la butée
 RECUL_CONFIRMATION_DEG = 5.0            # recul après la passe rapide : doit relâcher le galet
-TOLERANCE_CONFIRMATION_DEG = 3.0        # la passe lente doit retrouver la butée dans
-                                        # RECUL + cette tolérance, sinon défaut D8
+TOLERANCE_CONFIRMATION_DEG = 10.0       # la passe lente doit retrouver la butée dans
+                                        # RECUL + cette tolérance, sinon défaut D8. Couvre
+                                        # l'HYSTÉRÉSIS du galet : il se relâche plus tôt qu'il
+                                        # ne s'enclenche. 3° ne suffisaient pas sur machine
+                                        # (D8 à 8° le 2026-10-28).
 
 # ── Mouvement vers une position (centrage, recentrage sur ACQUITTEMENT) ────
 # Rampe en S de montée et de descente, chacune de DUREE_RAMPE_ROTATION_S

@@ -187,16 +187,19 @@ def initialiser(entrees, postes: dict, buzzer=None, delai_s: float = 90.0) -> fl
                    delai_s, "initialisation", buzzer)
 
 
-def arreter_postes(postes: dict) -> None:
-    """Arrêt de sécurité des postes d'un test : moteurs arrêtés puis libres."""
+def arreter_postes(postes: dict, liberer: bool = True) -> None:
+    """Arrêt des postes d'un test : moteurs arrêtés, puis libres seulement si
+    `liberer` (fin du test). En cours de test, les moteurs restent EXCITÉS : une
+    remise sous tension recale le rotor sur un pas entier et décale la position."""
     for poste in postes.values():
         poste.neutraliser()
     for poste in postes.values():
         poste.axe.attendre_fin(cfg.ARRET_THREAD_MAX_S)
-        try:
-            poste.axe.liberer()
-        except OSError:
-            pass
+        if liberer:
+            try:
+                poste.axe.liberer()
+            except OSError:
+                pass
 
 
 def fichier_resultat(prefixe: str):
