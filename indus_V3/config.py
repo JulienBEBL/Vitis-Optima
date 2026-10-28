@@ -289,7 +289,9 @@ PAS_PAR_DEGRE = DRIVER_PAS_PAR_TOUR / 360.0
 # Plage de rotation butée ANTIHORAIRE ↔ butée HORAIRE attendue, par poste.
 # Mesurée à chaque initialisation ; la valeur mesurée est comparée à celle-ci.
 # ⚠ À MESURER (test_5_moteur.py, étape 3) — à reprendre à chaque déplacement d'un capteur.
-PLAGE_NOMINALE_DEG = {POSTE_MERE: 130.0, POSTE_FILLE: 130.0}
+# Fille : ≈ 281,5° relevé au moteur le 2026-10-28 (test_5 étape 2), à affiner (étape 3).
+# Mère : ⚠ inconnue, mécanique pas encore montée.
+PLAGE_NOMINALE_DEG = {POSTE_MERE: 130.0, POSTE_FILLE: 281.5}
 
 # Écart toléré entre plage mesurée et plage nominale. Au-delà → défaut D9.
 PLAGE_TOLERANCE_DEG = 15.0
