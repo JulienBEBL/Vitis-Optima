@@ -197,3 +197,19 @@ def arreter_postes(postes: dict) -> None:
             poste.axe.liberer()
         except OSError:
             pass
+
+
+def fichier_resultat(prefixe: str):
+    """Chemin logs/<prefixe>_<date>_<heure>.txt : les résultats y sont gardés même
+    si la fenêtre se ferme (dans Geany, Ctrl+C la ferme)."""
+    from pathlib import Path
+    return Path(cfg.CHEMIN_JOURNAL).parent / f"{prefixe}_{time.strftime('%Y%m%d_%H%M%S')}.txt"
+
+
+def enregistrer(chemin, lignes: list) -> None:
+    """(Ré)écrit le fichier de résultat. Une erreur d'écriture n'arrête pas le test."""
+    try:
+        chemin.parent.mkdir(parents=True, exist_ok=True)
+        chemin.write_text("\n".join(lignes) + "\n", encoding="utf-8")
+    except OSError as erreur:
+        print(f"  (résultat non enregistré : {erreur})")

@@ -25,7 +25,7 @@ validée avant la suivante.
 | Relais | 4 relais câblés sur A2..A5 | **les 4 mêmes** : mandrin mère, coupe mère, mandrin fille, coupe fille. ⚠ attribution à refaire (test_4) |
 | Polarité mandrin | bit 0 = débridé | **bit 0 = mandrin OUVERT** (état sûr), bit 1 = mandrin fermé |
 | Boutons par poste | 3 : BRIDAGE, COUPE, POSITION | **4 : BRIDAGE, ROTATION +, ROTATION −, COUPE** → 8 boutons + ACQUITTEMENT. ⚠ attribution (test_2) |
-| Câblage des 2 nouveaux | — | proposé : **0x26 GPA4 et GPA5** (voir § 4.1) |
+| Câblage des boutons | 0x24 B0..B5 + ACQUITTEMENT 0x26 B0 | **relevé le 2026-10-28** : 0x24 B0..B5 + 0x26 A5..A7 (voir LOGIQUE.md § 7) |
 | Mécanique | moteur entre 2 positions (coupe / ligaturage) | moteur à arbre **parallèle au sol**, sur un **guide de translation déplacé à la main** (aucun capteur) ; il fait tourner le mandrin |
 | Fins de course | 2 par axe : COUPE / LIGATURAGE | 2 par axe, déplacées : **butées HORAIRE / ANTIHORAIRE** de la rotation du mandrin, plage ≈ 130° ⚠. Même câblage, contact NO actif bas. ⚠ attribution (test_3) |
 | Moteurs | NEMA 34 | **NEMA 24 StepperOnline 24IP65-30** : 3 N·m, 5,0 A, IP65. Pas de réducteur |
@@ -68,6 +68,8 @@ validée avant la suivante.
 | 2026-10-27 | Initialisation en deux passes de chaque côté : rapide pour trouver la butée, recul, lente pour la confirmer. |
 | 2026-10-27 | Dépassement possible à l'initialisation (plage nominale + marge) accepté. |
 | 2026-10-27 | LOGIQUE.md V3 validé (version 3.1). |
+| 2026-10-28 | Boutons relevés sur machine : 9 contacts NO, répartis sur 0x24 B, 0x26 A (COUPE mère, ACQUITTEMENT, ROTATION − fille). config.py désigne chaque bouton par (MCP, port, bit). I2C validé (test_1). |
+| 2026-10-28 | Tests utilisables depuis Geany : plus besoin de Ctrl+C (qui ferme la fenêtre), résultats enregistrés dans logs/. |
 | 2026-10-27 | Trouvé sur banc logiciel : le recul de confirmation est compté depuis le relâchement de la butée (sinon D4 à tort après un D1). |
 | 2026-10-27 | ACQUITTEMENT en marche recentre les deux postes ; il rouvre d'abord le mandrin s'il est fermé ; refusé pour un poste occupé. |
 | 2026-10-27 | Un poste fait une chose à la fois (§ 4.5). |

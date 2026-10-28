@@ -19,7 +19,11 @@ Puis il propose PLAGE_NOMINALE_DEG.
 La tolérance de plage (D9) est élargie pour ce test : la plage est justement
 inconnue. Le budget de la passe rapide aussi (BUDGET_TEST_FACTEUR). Surveiller
 le mandrin.
+
+Chaque mesure est ENREGISTRÉE au fil de l'eau dans logs/plage_<poste>_<date>.txt.
 """
+
+import time
 
 import _commun
 from _commun import cfg, question, titre
@@ -46,6 +50,17 @@ entrees, postes, buzzer = _commun.construire_postes(materiel, (nom,))
 poste = postes[nom]
 
 resultats = []          # (plage en pas, écart rapide/lente A, écart H, durée)
+FICHIER = _commun.fichier_resultat(f"plage_{nom}")
+journal = [f"TEST 6 — plage du poste {nom}, {cfg.DRIVER_PAS_PAR_TOUR} pas/tr — "
+           f"{time.strftime('%Y-%m-%d %H:%M:%S')}"]
+
+
+def noter(ligne: str) -> None:
+    """Affiche la ligne et réécrit le fichier de résultat."""
+    print(ligne)
+    journal.append(ligne.strip("\n"))
+    _commun.enregistrer(FICHIER, journal)
+
 try:
     print(f"\n  Budget de la passe rapide : {cfg.BUDGET_RECHERCHE_RAPIDE_PAS[nom]} pas "
           f"({cfg.BUDGET_RECHERCHE_RAPIDE_PAS[nom] / cfg.PAS_PAR_DEGRE:.0f}°).")
@@ -62,24 +77,24 @@ try:
 
         def texte(ecart):
             return "   départ sur la butée" if ecart is None else f"{ecart / cfg.PAS_PAR_DEGRE:+6.2f}°"
-        print(f"  ✓ mesure {numero} : plage {poste.plage} pas = {poste.degres(poste.plage)}, "
+        noter(f"  ✓ mesure {numero} : plage {poste.plage} pas = {poste.degres(poste.plage)}, "
               f"écart rapide/lente  A {texte(ecarts[A])}  H {texte(ecarts[H])}, {duree:.1f} s")
 
     plages = [r[0] for r in resultats]
     moyenne = sum(plages) / len(plages)
-    print("\n  Résultat :")
-    print(f"    plage : min {min(plages)} / moy {moyenne:.0f} / max {max(plages)} pas "
+    noter("\n  Résultat :")
+    noter(f"    plage : min {min(plages)} / moy {moyenne:.0f} / max {max(plages)} pas "
           f"(dispersion {(max(plages) - min(plages)) / cfg.PAS_PAR_DEGRE:.2f}°)")
-    print(f"\n    → dans config.py : PLAGE_NOMINALE_DEG[{nom}] = {moyenne / cfg.PAS_PAR_DEGRE:.1f}")
-    print(f"      (actuellement {cfg.PLAGE_NOMINALE_DEG[nom]:.1f}°)")
+    noter(f"\n    → dans config.py : PLAGE_NOMINALE_DEG[{nom}] = {moyenne / cfg.PAS_PAR_DEGRE:.1f}")
+    noter(f"      (actuellement {cfg.PLAGE_NOMINALE_DEG[nom]:.1f}°)")
     if max(plages) - min(plages) > cfg.ECART_RECALAGE_MAX_PAS:
-        print("\n    ⚠ les mesures diffèrent de plus de ECART_RECALAGE_MAX_DEG : perte de pas, jeu")
-        print("      mécanique ou galet à course morte importante. À comprendre avant de continuer.")
-    print()
+        noter("\n    ⚠ les mesures diffèrent de plus de ECART_RECALAGE_MAX_DEG : perte de pas, jeu")
+        noter("      mécanique ou galet à course morte importante. À comprendre avant de continuer.")
+    print(f"\n  Enregistré dans : {FICHIER}\n")
 except Defaut as defaut:
-    print(f"\n  ✗ DÉFAUT {defaut.code} : {defaut.detail}")
+    noter(f"\n  ✗ DÉFAUT {defaut.code} : {defaut.detail}")
 except TimeoutError as erreur:
-    print(f"\n  ✗ {erreur}")
+    noter(f"\n  ✗ {erreur}")
 except KeyboardInterrupt:
     print("\n  Interrompu.")
 finally:

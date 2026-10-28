@@ -28,7 +28,8 @@ Un appui simulé passe par les mêmes interlocks qu'un vrai : s'il est refusé
 (alors qu'il devait être accepté), ou si un poste part en défaut, le test
 s'arrête et dit pourquoi. Les VRAIS boutons restent actifs : ne pas y toucher.
 
-Les appuis simulés ne sont pas comptés dans etat/compteurs.json.
+Les appuis simulés ne sont pas comptés dans etat/compteurs.json. Le test se termine
+seul ; son récapitulatif est ENREGISTRÉ dans logs/cycle_<date>_<heure>.txt.
 """
 
 import sys
@@ -151,6 +152,7 @@ def noter(quoi: str, duree: float, cle: str | None = None) -> None:
 
 
 durees = {}
+conclusion = "non lancé"
 faits = 0
 try:
     if not confirmer(f"Zone dégagée, sans branche, lancer {cycles} cycle(s) ?"):
@@ -194,22 +196,32 @@ try:
         print(f"      cycle {numero} terminé en {time.monotonic() - debut_cycle:.1f} s")
         if numero < cycles:
             attendre(PAUSE_ENTRE_CYCLES_S)
-    print(f"\n  {faits} cycle(s) complet(s), sans défaut ni refus inattendu.")
+    conclusion = "sans défaut ni refus inattendu"
+    print(f"\n  {faits} cycle(s) complet(s), {conclusion}.")
 except Arret as arret:
-    print(f"\n  ✗ ARRÊT : {arret}")
+    conclusion = f"✗ ARRÊT : {arret}"
+    print(f"\n  {conclusion}")
 except KeyboardInterrupt:
+    conclusion = "interrompu"
     print("\n  Interrompu.")
 finally:
     tenus.clear()
     machine.arreter()
     materiel.fermer()
     if durees:
-        print("\n  ┌─ RÉCAPITULATIF À M'ENVOYER " + "─" * 46)
-        print(f"  │ {faits} cycle(s) complet(s) sur {cycles} demandé(s)")
-        print("  │")
-        print("  │ action                                          fois   durée moy.   min / max")
+        lignes = ["┌─ RÉCAPITULATIF À M'ENVOYER " + "─" * 46,
+                  f"│ {time.strftime('%Y-%m-%d %H:%M:%S')} — {faits} cycle(s) complet(s) sur {cycles} demandé(s)",
+                  f"│ fin : {conclusion}",
+                  "│",
+                  "│ action                                          fois   durée moy.   min / max"]
         for quoi, liste in durees.items():
-            print(f"  │ {quoi:46s} {len(liste):^5d}  {sum(liste) / len(liste):6.2f} s   "
-                  f"{min(liste):5.2f} / {max(liste):5.2f} s")
-        print("  └" + "─" * 73)
+            lignes.append(f"│ {quoi:46s} {len(liste):^5d}  {sum(liste) / len(liste):6.2f} s   "
+                          f"{min(liste):5.2f} / {max(liste):5.2f} s")
+        lignes.append("└" + "─" * 73)
+        print()
+        for ligne in lignes:
+            print("  " + ligne)
+        fichier = _commun.fichier_resultat("cycle")
+        _commun.enregistrer(fichier, lignes)
+        print(f"  Enregistré dans : {fichier}")
     print("  Relais à 0, moteurs libres.\n")

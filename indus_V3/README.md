@@ -72,7 +72,8 @@ continue**. ACQUITTEMENT relance l'initialisation du poste en défaut.
 Faire les étapes dans l'ordre. Ne passer à la suivante que si la précédente est bonne.
 Chaque script remet tout en sécurité en sortant, y compris sur `Ctrl+C`. Dans le terminal de
 Geany, `Ctrl+C` ferme la fenêtre et le résultat est perdu : les scripts s'arrêtent donc seuls
-(test_2, test_3 et la phase 3 de test_5 après un temps sans activité).
+(test_2, test_3 et la phase 3 de test_5 après un temps sans activité) ; test_7 s'arrête
+proprement sur ACQUITTEMENT ; les résultats des tests 2, 6, 7 et 8 sont enregistrés dans `logs/`.
 Arrêt d'urgence à portée de main dès l'étape 4.3. Mandrins vides jusqu'au § 4.4.
 
 ### 4.1 Entrées — rien ne bouge
@@ -80,8 +81,8 @@ Arrêt d'urgence à portée de main dès l'étape 4.3. Mandrins vides jusqu'au �
 | # | Commande | À vérifier | Si c'est faux |
 |---|---|---|---|
 | 1 | `python3 tests/test_1_i2c.py` | 3 × « ✓ » et 3 × « configuration conforme » | câblage I2C, `i2cdetect -y 1` |
-| 2 | `python3 tests/test_2_boutons.py` | Programme guidé : il nomme les 9 boutons un par un, tu appuies puis relâches ; résultat (entrée, contact NO / NF) et lignes `BTN_*` à la fin, enregistrés dans `logs/boutons_*.txt` | recopier les `BTN_*` et `BOUTONS_ACTIFS_BAS` proposés |
-| 3 | `python3 tests/test_2_boutons.py --apercu` | Chaque bouton allume **son** voyant ; un appui maintenu compte **un** appui ; arrêt seul après 20 s sans appui | — |
+| 2 | `python3 tests/test_2_boutons.py` | VALIDATION de config.py : le programme nomme les 9 boutons, tu appuies (et maintiens 2 s les 4 ROTATION) ; « TOUT EST BON » à la fin | si ✗ : `--attribution`, puis recopier les `BTN_*` proposés |
+| 3 | `python3 tests/test_2_boutons.py --apercu` | Voyants en direct ; arrêt seul après 20 s sans appui | — |
 | 4 | `python3 tests/test_3_capteurs.py --attribution` | Les 4 butées, HORAIRE / ANTIHORAIRE **vues du côté opérateur** ; contact NO | recopier les `CAP_*` proposés |
 | 5 | `python3 tests/test_3_capteurs.py`, galet actionné, **débrancher le connecteur** | Le voyant **s'éteint** (repli sûr) | câblage NF au lieu de NO |
 
@@ -170,7 +171,7 @@ Toutes sont dans `config.py`, marquées ⚠ :
 
 | Valeur | Comment | Étape |
 |---|---|---|
-| `BTN_*` | test_2 --attribution | 2 |
+| `BTN_*` | ✓ relevés le 2026-10-28 (test_2 --attribution), validation : test_2 | 2 |
 | `CAP_*`, `CAPTEURS_ACTIFS_BAS` | test_3 --attribution | 4, 5 |
 | `EV_*` | test_4 | 6, 7 |
 | `TEMPS_MANOEUVRE_MANDRIN_S`, `TEMPS_COUPE_S`, `TEMPS_AVANT_COUPE_S`, `TEMPS_APRES_COUPE_S` | test_4 | 8 |

@@ -5,7 +5,7 @@ entrees.py — Boutons et butées : lecture, anti-rebond, fronts.
 Origine : indus V2 libs/entrees.py, lui-même repris de Vitis V1
 indus/vitis_optima.py, classe `Boutons` (anti-rebond par temps de stabilité,
 non bloquant, une seule lecture I2C par port et par tour).
-Changements V3 : 9 boutons sur 3 ports (les 2 ROTATION − sur le 0x26 port A),
+Changements V3 : 9 boutons répartis sur 3 ports (MCP, port, bit) donnés par config.py,
 butées HORAIRE / ANTIHORAIRE au lieu de COUPE / LIGATURAGE, état brut des
 boutons exposé par tenu().
 
@@ -35,18 +35,20 @@ ACQUITTEMENT = "acquittement"
 # Noms canoniques des boutons, dans l'ordre d'affichage : « action_poste ».
 NOMS_BOUTONS = tuple(f"{action}_{poste}" for poste in cfg.POSTES for action in ACTIONS) + (ACQUITTEMENT,)
 
-# nom → (octet source, bit). L'octet source est la clé de Entrees.octets.
-CABLAGE_BOUTONS = {
-    f"{BRIDAGE}_{cfg.POSTE_MERE}": ("0x24_B", cfg.BTN_BRIDAGE_MERE),
-    f"{ROTATION_PLUS}_{cfg.POSTE_MERE}": ("0x24_B", cfg.BTN_ROTATION_PLUS_MERE),
-    f"{ROTATION_MOINS}_{cfg.POSTE_MERE}": ("0x26_A", cfg.BTN_ROTATION_MOINS_MERE),
-    f"{COUPE}_{cfg.POSTE_MERE}": ("0x24_B", cfg.BTN_COUPE_MERE),
-    f"{BRIDAGE}_{cfg.POSTE_FILLE}": ("0x24_B", cfg.BTN_BRIDAGE_FILLE),
-    f"{ROTATION_PLUS}_{cfg.POSTE_FILLE}": ("0x24_B", cfg.BTN_ROTATION_PLUS_FILLE),
-    f"{ROTATION_MOINS}_{cfg.POSTE_FILLE}": ("0x26_A", cfg.BTN_ROTATION_MOINS_FILLE),
-    f"{COUPE}_{cfg.POSTE_FILLE}": ("0x24_B", cfg.BTN_COUPE_FILLE),
-    ACQUITTEMENT: ("0x26_B", cfg.BTN_ACQUITTEMENT),
+# nom → (octet source, bit). L'octet source est la clé de Entrees.octets :
+# « 0x24_B », « 0x26_A » ou « 0x26_B ». config.py donne (MCP, port, bit).
+_CONFIG_BOUTONS = {
+    f"{BRIDAGE}_{cfg.POSTE_MERE}": cfg.BTN_BRIDAGE_MERE,
+    f"{ROTATION_PLUS}_{cfg.POSTE_MERE}": cfg.BTN_ROTATION_PLUS_MERE,
+    f"{ROTATION_MOINS}_{cfg.POSTE_MERE}": cfg.BTN_ROTATION_MOINS_MERE,
+    f"{COUPE}_{cfg.POSTE_MERE}": cfg.BTN_COUPE_MERE,
+    f"{BRIDAGE}_{cfg.POSTE_FILLE}": cfg.BTN_BRIDAGE_FILLE,
+    f"{ROTATION_PLUS}_{cfg.POSTE_FILLE}": cfg.BTN_ROTATION_PLUS_FILLE,
+    f"{ROTATION_MOINS}_{cfg.POSTE_FILLE}": cfg.BTN_ROTATION_MOINS_FILLE,
+    f"{COUPE}_{cfg.POSTE_FILLE}": cfg.BTN_COUPE_FILLE,
+    ACQUITTEMENT: cfg.BTN_ACQUITTEMENT,
 }
+CABLAGE_BOUTONS = {nom: (f"{mcp}_{port}", bit) for nom, (mcp, port, bit) in _CONFIG_BOUTONS.items()}
 
 # (poste, sens) → bit du port B du 0x26
 CABLAGE_BUTEES = {

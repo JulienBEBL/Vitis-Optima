@@ -39,7 +39,6 @@ Seuls les drivers 1 (poste mère) et 2 (poste fille) sont utilisés.
  VALEURS NON CONFIRMÉES — à vérifier avec les scripts de tests/ (voir README.md)
 ═══════════════════════════════════════════════════════════════════════════════
   ⚠ À ATTRIBUER   EV_* ................. relais ↔ EV                     (test_4)
-                  BTN_* ................ bouton physique ↔ bit           (test_2)
                   CAP_* ................ butée ↔ bit, sens               (test_3)
                   DIR_VERS_HORAIRE ..... sens de rotation par poste      (test_5)
                   SENS_ROTATION_PLUS ... sens du bouton ROTATION +       (test_5)
@@ -94,7 +93,7 @@ RELECTURE_CONFIG_MCP_PERIODE_S = 2.0
 # ── Adresses des trois MCP23017 ────────────────────────────────────────────
 MCP_RELAIS_ADDR = 0x24    # port A = 6 relais (A2..A7)        | port B = 6 boutons (B0..B5)
 MCP_DRIVERS_ADDR = 0x25   # port A = DIR drivers 1..8 (A7..A0) | port B = ENA drivers 1..8 (B0..B7)
-MCP_ENTREES_ADDR = 0x26   # port A = 2 boutons ROTATION − (A4, A5) | port B = ACQUITTEMENT (B0) + 4 butées (B1..B4)
+MCP_ENTREES_ADDR = 0x26   # port A = 3 boutons (A5..A7)       | port B = 4 butées (B1..B4)
 
 # ── Configuration attendue de chaque MCP : (port A, port B) ────────────────
 # IODIR : bit à 1 = entrée, bit à 0 = sortie. Un port = une seule direction :
@@ -151,27 +150,32 @@ EV_MANDRIN_FILLE = 5     # GPA5 — relais 4   ⚠ à attribuer
 # ═══════════════════════════════════════════════════════════════════════════
 #  BOUTONS  (entrées)
 # ═══════════════════════════════════════════════════════════════════════════
-# 4 boutons par poste + ACQUITTEMENT = 9 entrées sur 3 ports.
-# ⚠ ATTRIBUTION À REFAIRE (test_2_boutons.py). Valeurs de départ = relevé V2 du
-#   2026-10-08, l'ancien bouton POSITION devenant ROTATION +.
+# 4 boutons par poste + ACQUITTEMENT = 9 entrées. Chaque bouton est désigné par
+# (MCP, port, bit) : le câblage V3 répartit les boutons sur trois ports.
+# Entrées câblées sur le PCB : 0x24 port B bits 0..5, 0x26 port A bits 4..7,
+# 0x26 port B bits 0..4 (partagé avec les butées). verifier_config() le contrôle.
+# Le 0x26 est lu en une seule transaction (ports A et B) : un bouton sur le
+# port A ne coûte aucune lecture I2C de plus.
+#
+# Relevé sur machine le 2026-10-28 (test_2_boutons.py, attribution guidée) :
+# 9 contacts NO, repos à 1.
+BTN_BRIDAGE_MERE = ("0x24", "B", 5)          # GPB5
+BTN_ROTATION_PLUS_MERE = ("0x24", "B", 4)    # GPB4
+BTN_ROTATION_MOINS_MERE = ("0x24", "B", 3)   # GPB3
+BTN_COUPE_MERE = ("0x26", "A", 5)            # GPA5
+BTN_BRIDAGE_FILLE = ("0x24", "B", 1)         # GPB1
+BTN_ROTATION_PLUS_FILLE = ("0x24", "B", 0)   # GPB0
+BTN_ROTATION_MOINS_FILLE = ("0x26", "A", 7)  # GPA7
+BTN_COUPE_FILLE = ("0x24", "B", 2)           # GPB2
+BTN_ACQUITTEMENT = ("0x26", "A", 6)          # GPA6
+# Libres : 0x26 GPA4, 0x26 GPB0 (ancien ACQUITTEMENT de la V2).
 
-# MCP 0x24 port B — 6 entrées câblées sur le PCB (B0..B5).
-BTN_BRIDAGE_MERE = 0           # GPB0
-BTN_ROTATION_PLUS_MERE = 1     # GPB1 (ancien POSITION mère)
-BTN_COUPE_MERE = 2             # GPB2
-BTN_COUPE_FILLE = 3            # GPB3
-BTN_ROTATION_PLUS_FILLE = 4    # GPB4 (ancien POSITION fille)
-BTN_BRIDAGE_FILLE = 5          # GPB5
-
-# MCP 0x26 port A — les 2 nouveaux boutons (GPA4..GPA7 câblés et libres sur le PCB).
-# Lus dans la même transaction que le port B : aucune lecture I2C de plus.
-BTN_ROTATION_MOINS_MERE = 4    # GPA4
-BTN_ROTATION_MOINS_FILLE = 5   # GPA5
-
-# MCP 0x26 port B — B0..B4 câblés.
-BTN_ACQUITTEMENT = 0           # GPB0
+# Entrées câblées sur le PCB, par port. Ne pas modifier.
+ENTREES_BOUTONS_CABLEES = {("0x24", "B"): range(0, 6), ("0x26", "A"): range(4, 8),
+                           ("0x26", "B"): range(0, 5)}
 
 # True : bouton NO vers la masse + pull-up → appui = niveau bas.
+# Confirmé sur machine le 2026-10-28 : les 9 boutons au repos à 1 (contacts NO).
 BOUTONS_ACTIFS_BAS = True
 
 # Anti-rebond par temps de stabilité, non bloquant. Un appui n'est retenu
@@ -526,26 +530,25 @@ def verifier_config() -> None:
         _dans(nom, bit, set(range(2, 8)))          # relais sur A2..A7 seulement
     _distincts("EV (0x24 A)", ev)
 
-    btn_24 = {"BTN_BRIDAGE_MERE": BTN_BRIDAGE_MERE, "BTN_ROTATION_PLUS_MERE": BTN_ROTATION_PLUS_MERE,
-              "BTN_COUPE_MERE": BTN_COUPE_MERE, "BTN_BRIDAGE_FILLE": BTN_BRIDAGE_FILLE,
-              "BTN_ROTATION_PLUS_FILLE": BTN_ROTATION_PLUS_FILLE, "BTN_COUPE_FILLE": BTN_COUPE_FILLE}
-    for nom, bit in btn_24.items():
-        _dans(nom, bit, set(range(0, 6)))          # entrées câblées B0..B5
-    _distincts("boutons (0x24 B)", btn_24)
-
-    btn_26a = {"BTN_ROTATION_MOINS_MERE": BTN_ROTATION_MOINS_MERE,
-               "BTN_ROTATION_MOINS_FILLE": BTN_ROTATION_MOINS_FILLE}
-    for nom, bit in btn_26a.items():
-        _dans(nom, bit, set(range(4, 8)))          # entrées câblées A4..A7
-    _distincts("boutons (0x26 A)", btn_26a)
+    boutons = {"BTN_BRIDAGE_MERE": BTN_BRIDAGE_MERE, "BTN_ROTATION_PLUS_MERE": BTN_ROTATION_PLUS_MERE,
+               "BTN_ROTATION_MOINS_MERE": BTN_ROTATION_MOINS_MERE, "BTN_COUPE_MERE": BTN_COUPE_MERE,
+               "BTN_BRIDAGE_FILLE": BTN_BRIDAGE_FILLE, "BTN_ROTATION_PLUS_FILLE": BTN_ROTATION_PLUS_FILLE,
+               "BTN_ROTATION_MOINS_FILLE": BTN_ROTATION_MOINS_FILLE, "BTN_COUPE_FILLE": BTN_COUPE_FILLE,
+               "BTN_ACQUITTEMENT": BTN_ACQUITTEMENT}
+    for nom, entree in boutons.items():
+        if not (isinstance(entree, tuple) and len(entree) == 3 and entree[:2] in ENTREES_BOUTONS_CABLEES):
+            erreurs.append(f"{nom} = {entree!r} — attendu (MCP, port, bit) parmi les ports "
+                           f"{sorted(ENTREES_BOUTONS_CABLEES)}")
+        elif entree[2] not in ENTREES_BOUTONS_CABLEES[entree[:2]]:
+            erreurs.append(f"{nom} = {entree!r} — bit non câblé sur ce port "
+                           f"({list(ENTREES_BOUTONS_CABLEES[entree[:2]])})")
 
     cap = {"CAP_MERE_HORAIRE": CAP_MERE_HORAIRE, "CAP_MERE_ANTIHORAIRE": CAP_MERE_ANTIHORAIRE,
            "CAP_FILLE_HORAIRE": CAP_FILLE_HORAIRE, "CAP_FILLE_ANTIHORAIRE": CAP_FILLE_ANTIHORAIRE}
     for nom, bit in cap.items():
         _dans(nom, bit, set(range(0, 5)))          # entrées câblées B0..B4
-    _dans("BTN_ACQUITTEMENT", BTN_ACQUITTEMENT, set(range(0, 5)))
-    # Même port que ACQUITTEMENT : aucun bit en double entre les cinq.
-    _distincts("butées + acquittement (0x26 B)", {**cap, "BTN_ACQUITTEMENT": BTN_ACQUITTEMENT})
+    # Aucune entrée en double entre les 9 boutons et les 4 butées (0x26 port B).
+    _distincts("boutons + butées", {**boutons, **{nom: ("0x26", "B", bit) for nom, bit in cap.items()}})
 
     for nom, bit in (("DIR_MERE", DIR_MERE), ("DIR_FILLE", DIR_FILLE),
                      ("ENA_MERE", ENA_MERE), ("ENA_FILLE", ENA_FILLE)):

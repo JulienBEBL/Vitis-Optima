@@ -318,11 +318,17 @@ Toutes les lignes ⚠ sont attribuées par les scripts de test avant le premier 
 | GPA0–1 | non câblés sur le PCB | — | — |
 | GPA2..GPA5 | **EV mandrin mère, EV coupe mère, EV mandrin fille, EV coupe fille** ⚠ attribution test_4 | `EV_MANDRIN_MERE`, `EV_COUPE_MERE`, `EV_MANDRIN_FILLE`, `EV_COUPE_FILLE` | **0 = mandrin ouvert / lame haute** |
 | GPA6–7 | relais 5 et 6, libres | — | 0 |
-| GPB0..GPB5 | BRIDAGE, COUPE, ROTATION + de chaque poste ⚠ attribution test_2 | `BTN_BRIDAGE_*`, `BTN_COUPE_*`, `BTN_ROTATION_PLUS_*` | — |
+| GPB0 | bouton **ROTATION + fille** | `BTN_ROTATION_PLUS_FILLE` | — |
+| GPB1 | bouton **BRIDAGE fille** | `BTN_BRIDAGE_FILLE` | — |
+| GPB2 | bouton **COUPE fille** | `BTN_COUPE_FILLE` | — |
+| GPB3 | bouton **ROTATION − mère** | `BTN_ROTATION_MOINS_MERE` | — |
+| GPB4 | bouton **ROTATION + mère** | `BTN_ROTATION_PLUS_MERE` | — |
+| GPB5 | bouton **BRIDAGE mère** | `BTN_BRIDAGE_MERE` | — |
 | GPB6–7 | non câblés sur le PCB | — | — |
 
-Point de départ de config.py : les bits relevés en V2 (l'ancien POSITION devient
-ROTATION +, l'ancien bridage devient le mandrin), à reconfirmer.
+Boutons relevés sur machine le 2026-10-28 (test_2, attribution guidée) : 9 contacts NO.
+Dans config.py, chaque bouton est désigné par (MCP, port, bit). Relais : point de départ
+= bits relevés en V2 (l'ancien bridage devient le mandrin), à reconfirmer (test_4).
 
 ### 7.2 MCP 0x25 — DIR et ENA · inchangé
 
@@ -330,22 +336,23 @@ DIR driver 1 (mère) = GPA7, driver 2 (fille) = GPA6 (câblage inversé du PCB).
 GPB0, fille = GPB1. ENA = 0 → moteur excité, 1 → libre. Les 6 ENA inutilisés forcés à 1.
 Sens : `DIR_VERS_HORAIRE` par poste ⚠ test_5.
 
-### 7.3 MCP 0x26 — butées, ACQUITTEMENT, 2 nouveaux boutons
+### 7.3 MCP 0x26 — butées et 3 boutons
 
 `IODIRA = IODIRB = 0xFF` · `GPPUA = GPPUB = 0xFF`
 
 | Bit | Signal | Constante |
 |---|---|---|
 | GPA0–3 | non câblés | — |
-| **GPA4** | bouton **ROTATION − mère** ⚠ | `BTN_ROTATION_MOINS_MERE` |
-| **GPA5** | bouton **ROTATION − fille** ⚠ | `BTN_ROTATION_MOINS_FILLE` |
-| GPA6–7 | libres (câblés) | — |
-| GPB0 | bouton **ACQUITTEMENT** | `BTN_ACQUITTEMENT` |
+| GPA4 | libre (câblé) | — |
+| **GPA5** | bouton **COUPE mère** | `BTN_COUPE_MERE` |
+| **GPA6** | bouton **ACQUITTEMENT** | `BTN_ACQUITTEMENT` |
+| **GPA7** | bouton **ROTATION − fille** | `BTN_ROTATION_MOINS_FILLE` |
+| GPB0 | libre (ACQUITTEMENT en V2) | — |
 | GPB1..GPB4 | les 4 butées : HORAIRE et ANTIHORAIRE de chaque poste ⚠ attribution test_3 | `CAP_*_HORAIRE`, `CAP_*_ANTIHORAIRE` |
 | GPB5–7 | non câblés | — |
 
 Les quatre butées restent sur le même port : une seule lecture → photo cohérente pour D2.
-GPIOA et GPIOB sont lus en une transaction de 2 octets : les deux nouveaux boutons ne
+GPIOA et GPIOB sont lus en une transaction de 2 octets : les boutons du port A ne
 coûtent aucune lecture I2C de plus.
 
 ### 7.4 GPIO directs (BCM) · inchangés

@@ -21,9 +21,13 @@ moteur perd des pas (décrochage, rampe trop courte, courant trop faible).
 
 UN DÉFAUT N'ARRÊTE PAS LE RODAGE. Le script note le raté, réinitialise le poste
 concerné, puis continue. Il ne s'arrête que si RATES_DE_SUITE_MAX trajets ratés
-se suivent. Ctrl+C arrête tout.
+se suivent.
 
-À la fin (ou sur Ctrl+C) : récapitulatif par poste et par sens, à m'envoyer.
+POUR ARRÊTER AVANT LA FIN : appuyer sur ACQUITTEMENT. Le rodage s'arrête à la
+fin du trajet en cours, proprement. (Dans Geany, Ctrl+C ferme la fenêtre : le
+garder pour l'urgence, avec l'arrêt d'urgence.)
+
+À la fin : récapitulatif par poste et par sens, à m'envoyer.
 Il est aussi ENREGISTRÉ dans indus_V3/logs/rodage_<date>_<heure>.txt, et
 réécrit tous les 20 trajets et à chaque raté.
 
@@ -38,6 +42,7 @@ from pathlib import Path
 
 import _commun
 from _commun import cfg, confirmer, question, titre
+from libs.entrees import ACQUITTEMENT
 from libs.poste import PRET, Defaut
 
 PAUSE_ENTRE_TRAJETS_S = 0.5
@@ -57,6 +62,16 @@ entrees, postes, buzzer = _commun.construire_postes(materiel)
 mesures = {}       # (poste, sens) → [(écart de recalage en pas, durée, retard max ms)]
 rates = {}         # (poste, sens) → [(numéro du trajet, raison)]
 plages = {}        # poste → plage mesurée à la dernière initialisation (pas)
+arret_demande = [False]   # ACQUITTEMENT appuyé pendant le rodage
+
+
+def surveiller_acquittement() -> bool:
+    """Appelé à chaque tour de boucle : note un appui sur ACQUITTEMENT."""
+    if entrees.appui(ACQUITTEMENT) and not arret_demande[0]:
+        arret_demande[0] = True
+        buzzer.bip_court()
+        print("\n        ACQUITTEMENT : arrêt à la fin du trajet en cours")
+    return False
 
 
 def trajet(sens: str) -> dict:
@@ -74,7 +89,8 @@ def trajet(sens: str) -> dict:
             actifs[nom] = poste
     while actifs:
         try:
-            _commun.tourner(entrees, actifs, lambda: any(p.etat == PRET for p in actifs.values()),
+            _commun.tourner(entrees, actifs,
+                            lambda: surveiller_acquittement() or any(p.etat == PRET for p in actifs.values()),
                             DELAI_TRAJET_S, f"trajet vers {sens}", buzzer)
         except Defaut as defaut:
             fautif = _poste_du_defaut(defaut, actifs)
@@ -154,6 +170,7 @@ try:
         raise SystemExit("  Non lancé.")
 
     print(f"  Récapitulatif enregistré au fil de l'eau dans : {FICHIER_RECAP}")
+    print("  Pour arrêter avant la fin : ACQUITTEMENT (arrêt à la fin du trajet en cours).")
     print("\n   n°  vers          mère : écart / durée / retard       fille : écart / durée / retard")
 
     def colonne(valeur) -> str:
@@ -188,9 +205,12 @@ try:
         sens = cfg.sens_oppose(sens)
         if numero % ENREGISTREMENT_TOUS_LES == 0:
             recapitulatif(faits, afficher=False)
+        if arret_demande[0]:
+            break
         time.sleep(PAUSE_ENTRE_TRAJETS_S)
     total = sum(len(liste) for liste in rates.values())
-    print(f"\n  Rodage terminé : {faits} trajets, {total} raté(s).")
+    fin = "arrêté par ACQUITTEMENT" if arret_demande[0] else "terminé"
+    print(f"\n  Rodage {fin} : {faits} trajets, {total} raté(s).")
 except Defaut as defaut:
     print(f"\n  ✗ DÉFAUT {defaut.code} : {defaut.detail}")
 except TimeoutError as erreur:
