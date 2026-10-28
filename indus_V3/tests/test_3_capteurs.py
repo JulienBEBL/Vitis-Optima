@@ -21,7 +21,8 @@ butée HORAIRE »…),
 tu actionnes à la main le galet correspondant puis tu le relâches. Il note sur
 quel bit ça arrive et dans quel sens le bit bascule. À la fin il affiche les
 lignes CAP_* à recopier dans config.py. Il écoute tous les bits des ports
-d'entrée, quelle que soit la config actuelle. Ctrl+C pour abandonner.
+d'entrée, quelle que soit la config actuelle. Le menu demande quel(s) poste(s) : une
+butée non branchée est notée « NON VUE » après ATTENTE_GALET_S, et on passe à la suivante.
 
   Rappel : HORAIRE et ANTIHORAIRE sont les deux bouts de la rotation du
   mandrin, VUS DU CÔTÉ OPÉRATEUR, pour les deux postes. La butée HORAIRE est
@@ -44,6 +45,7 @@ PORTS = ("0x26 A", "0x26 B", "0x24 B")
 PERIODE_S = 0.01
 LECTURES_STABLES = 5      # un changement est retenu après 5 lectures identiques (50 ms)
 INACTIVITE_S = 20.0       # aperçu et mode direct : arrêt après ce temps sans changement
+ATTENTE_GALET_S = 60.0    # attribution : attente d'un galet ; au-delà, butée notée NON VUE
 
 CAPTEURS = (("CAP_MERE_HORAIRE", "MÈRE  — butée HORAIRE"),
             ("CAP_MERE_ANTIHORAIRE", "MÈRE  — butée ANTIHORAIRE"),
@@ -76,16 +78,23 @@ def differences(avant: dict, apres: dict) -> list:
 
 
 def mode_attribution() -> None:
-    print("  Tous les galets LIBRES pour commencer. Pour chaque butée")
-    print("  annoncée : actionner le galet à la main, puis le relâcher.")
-    print("  Ctrl+C pour abandonner.\n")
+    noms = _commun.choisir_postes("Butées de quel(s) poste(s) ? (seulement celles qui sont branchées)")
+    capteurs = [(c, l) for c, l in CAPTEURS if any(f"_{n.upper()}_" in c for n in noms)]
+    print("\n  Tous les galets LIBRES pour commencer. Pour chaque butée annoncée : actionner")
+    print(f"  le galet à la main, puis le relâcher. {ATTENTE_GALET_S:.0f} s maximum par butée.\n")
     repos = lire_stable()
     print(f"  Au repos : 0x26 A = {bits(repos['0x26 A'])}   0x26 B = {bits(repos['0x26 B'])}\n")
 
+    def attendre_relachement() -> None:
+        debut = time.monotonic()
+        while differences(repos, lire_stable()) and time.monotonic() - debut < ATTENTE_GALET_S:
+            pass
+
     attribution = {}          # constante → (port, bit, niveau galet actionné)
-    for constante, libelle in CAPTEURS:
+    for constante, libelle in capteurs:
         print(f"  → Actionne le galet {libelle:26s} … ", end="", flush=True)
-        while True:
+        debut = time.monotonic()
+        while constante not in attribution and time.monotonic() - debut < ATTENTE_GALET_S:
             octets = lire_stable()
             diff = differences(repos, octets)
             if not diff:
@@ -102,32 +111,40 @@ def mode_attribution() -> None:
                 niveau = (octets[port] >> bit) & 1
                 attribution[constante] = (port, bit, niveau)
                 print(f"{port} bit {bit}, passe à {niveau}")
-            while differences(repos, lire_stable()):      # attendre le relâchement
-                pass
-            if constante in attribution:
-                break
+            attendre_relachement()
+        if constante not in attribution:
+            print("NON VU")
 
-    print("\n  À recopier dans config.py :\n")
-    for constante, _ in CAPTEURS:
-        port, bit, _niveau = attribution[constante]
-        print(f"    {constante:22s} = {bit}    # {port.replace(' ', ' GP')}{bit}")
-
+    lignes = ["┌─ RÉSULTAT DES BUTÉES " + "─" * 56]
+    for constante, libelle in capteurs:
+        if constante in attribution:
+            port, bit, _niveau = attribution[constante]
+            lignes.append(f"│   {constante:22s} = {bit}    # {port.replace(' ', ' GP')}{bit}")
+        else:
+            lignes.append(f"│   {constante:22s} : NON VU ({libelle.strip()}) — fil, connecteur ou capteur")
     niveaux = {a[2] for a in attribution.values()}
     if niveaux == {0}:
-        print("\n  ✓ Les 4 passent à 0 quand le galet est actionné : contact NO, comme prévu.")
-        print("    CAPTEURS_ACTIFS_BAS = True")
+        lignes.append("│ ✓ Passent à 0 quand le galet est actionné : contact NO, comme prévu.")
     elif niveaux == {1}:
-        print("\n  ⚠ Les 4 passent à 1 quand le galet est actionné : c'est le contact NC qui est")
-        print("    câblé. Passer sur le contact NO (recommandé : un fil coupé se lit alors")
-        print("    « pas en butée »), ou mettre CAPTEURS_ACTIFS_BAS = False.")
-    else:
-        print("\n  ⚠ Les capteurs ne basculent pas tous dans le même sens : câblage NO / NC")
-        print("    mélangé. Le programme exige le même sens pour les quatre.")
+        lignes.append("│ ⚠ Passent à 1 quand le galet est actionné : contact NC câblé. Passer sur le NO")
+        lignes.append("│   (un fil coupé se lit alors « pas en butée »).")
+    elif niveaux:
+        lignes.append("│ ⚠ Contacts NO et NC mélangés : le programme exige le même sens pour toutes.")
     hors_port = [c for c, a in attribution.items() if a[0] != "0x26 B"]
     if hors_port:
-        print("\n  ⚠ Pas sur le 0x26 port B : " + ", ".join(hors_port))
-        print("    → me le signaler : il faut adapter libs/entrees.py, pas seulement config.py.")
+        lignes.append("│ ⚠ Pas sur le 0x26 port B : " + ", ".join(hors_port) + " — me le signaler.")
+    absentes = [c for c, _ in CAPTEURS if c not in dict(capteurs)]
+    if absentes:
+        lignes.append("│ Non testées (poste non choisi) : " + ", ".join(absentes))
+    lignes.append("│ Si une butée du poste prend un bit donné à l'autre poste dans config.py,")
+    lignes.append("│ donner à l'autre poste les bits restants (pas deux butées sur un bit).")
+    lignes.append("└" + "─" * 78)
     print()
+    for ligne in lignes:
+        print("  " + ligne)
+    fichier = _commun.fichier_resultat("butees")
+    _commun.enregistrer(fichier, lignes)
+    print(f"\n  Enregistré dans : {fichier}\n")
 
 
 def mode_direct() -> None:

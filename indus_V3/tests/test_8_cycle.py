@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-test_8_cycle.py — Cycle complet automatique, les deux postes en même temps.
+test_8_cycle.py — Cycle complet automatique, les postes en même temps.
+
+Le menu demande quels postes : les deux, ou un seul (montage partiel).
 
 ⚠ CE TEST FAIT TOUT BOUGER : mandrins, lames, les deux moteurs. Arrêt d'urgence
    à portée de main, mains hors de la machine, SANS branche. Tests 4 (EV) et 7
@@ -54,11 +56,16 @@ titre("TEST 8 — CYCLE COMPLET AUTOMATIQUE")
 print("  ⚠ Mandrins, lames et moteurs vont bouger. Mains hors de la machine, sans branche.")
 reponse = question(f"Nombre de cycles [{CYCLES_PAR_DEFAUT}] ?")
 cycles = int(reponse) if reponse.isdigit() and int(reponse) > 0 else CYCLES_PAR_DEFAUT
+noms = _commun.choisir_postes("Postes du cycle ? (seulement ceux qui sont branchés)")
 
 materiel = _commun.ouvrir(avec_gpio=True)
 configurer_journal()
 sys.setswitchinterval(cfg.PYTHON_SWITCH_INTERVAL_S)
 machine = programme._construire_machine(materiel, compteurs=_commun.CompteursMuets())
+# Montage partiel : un poste non branché est retiré de la machine. Ses boutons sont
+# ignorés, ses relais restent à 0, son moteur reste libre (mis à l'ouverture du matériel).
+for nom in [n for n in machine.postes if n not in noms]:
+    del machine.postes[nom]
 postes = list(machine.postes.values())
 entrees = machine._entrees
 
@@ -163,7 +170,7 @@ try:
     tourner_jusqua(lambda: True, 1, "démarrage")
     simules.add(ACQUITTEMENT)
     duree = tourner_jusqua(tous_prets, 120, "initialisation")
-    noter("deux postes initialisés et centrés", duree)
+    noter("postes initialisés et centrés : " + ", ".join(p.nom for p in postes), duree)
 
     for numero in range(1, cycles + 1):
         print(f"\n  Cycle {numero} / {cycles} :")

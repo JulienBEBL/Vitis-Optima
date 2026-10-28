@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-test_7_rodage.py — Allers-retours des DEUX mandrins, butée à butée, en même temps.
+test_7_rodage.py — Allers-retours des mandrins, butée à butée, en même temps.
+
+Le menu demande quels postes : les deux, ou un seul (montage partiel).
 
 ⚠ CE TEST FAIT TOURNER LES DEUX MOTEURS EN MÊME TEMPS. Arrêt d'urgence à portée
    de main, mandrins vides. test_5 validé et test_6 fait sur les deux postes d'abord.
@@ -56,9 +58,10 @@ titre("TEST 7 — RODAGE : ALLERS-RETOURS DES DEUX MANDRINS ENSEMBLE")
 print("  ⚠ Les deux moteurs tournent en même temps. Mandrins vides.")
 reponse = question(f"Nombre d'allers-retours [{CYCLES_PAR_DEFAUT}] ?")
 cycles = int(reponse) if reponse.isdigit() and int(reponse) > 0 else CYCLES_PAR_DEFAUT
+noms = _commun.choisir_postes("Postes à roder ? (seulement ceux qui sont branchés)")
 
 materiel = _commun.ouvrir(avec_gpio=True)
-entrees, postes, buzzer = _commun.construire_postes(materiel)
+entrees, postes, buzzer = _commun.construire_postes(materiel, noms)
 mesures = {}       # (poste, sens) → [(écart de recalage en pas, durée, retard max ms)]
 rates = {}         # (poste, sens) → [(numéro du trajet, raison)]
 plages = {}        # poste → plage mesurée à la dernière initialisation (pas)
@@ -173,7 +176,9 @@ try:
     print("  Pour arrêter avant la fin : ACQUITTEMENT (arrêt à la fin du trajet en cours).")
     print("\n   n°  vers          mère : écart / durée / retard       fille : écart / durée / retard")
 
-    def colonne(valeur) -> str:
+    def colonne(valeur, nom: str) -> str:
+        if nom not in postes:
+            return "        (non branché)     "
         if not isinstance(valeur, tuple):
             return "         R A T É          "
         return f"{valeur[0] / cfg.PAS_PAR_DEGRE:+6.2f}° / {valeur[1]:5.1f} s / {valeur[2]:4.1f} ms"
@@ -187,8 +192,8 @@ try:
         for nom, valeur in resultats.items():
             if isinstance(valeur, tuple):
                 mesures.setdefault((nom, sens), []).append(valeur)
-        print(f"  {numero:4d}  {sens:12s}  {colonne(resultats.get(cfg.POSTE_MERE))}"
-              f"     {colonne(resultats.get(cfg.POSTE_FILLE))}")
+        print(f"  {numero:4d}  {sens:12s}  {colonne(resultats.get(cfg.POSTE_MERE), cfg.POSTE_MERE)}"
+              f"     {colonne(resultats.get(cfg.POSTE_FILLE), cfg.POSTE_FILLE)}")
         if echecs:
             for nom, raison in echecs.items():
                 rates.setdefault((nom, sens), []).append((numero, raison))

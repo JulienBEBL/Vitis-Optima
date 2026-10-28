@@ -12,6 +12,8 @@ utilise les corrections trouvées aux étapes précédentes, même si config.py
 n'est pas encore corrigé.
 
 ÉTAPE 1 — QUEL MOTEUR EST QUI (les deux drivers, l'un après l'autre)
+  Montage partiel accepté : un driver sans moteur → répondre « 0 = aucun » ;
+  les étapes suivantes ne portent alors que sur le poste branché.
   Le programme fait faire au moteur « mère » de config.py un petit aller-retour
   lent (IDENT_DEG, arrêt immédiat sur toute butée). Tu dis quel mandrin a
   tourné, et dans quel SENS il est parti (vu côté opérateur). Puis pareil pour
@@ -152,9 +154,7 @@ def etape_identification() -> None:
             if qui == "r":
                 continue
             if qui == "0":
-                axe.liberer()
-                raise SystemExit("  ✗ Aucun mandrin n'a tourné : alimentation du driver, LED rouge, ENA, "
-                                 "câble moteur, DIP. Relancer après correction.")
+                break
             if qui == "2":
                 axe.liberer()
                 raise SystemExit("  ✗ Les deux ont tourné : deux drivers sur le même PUL ou le même câble. "
@@ -165,13 +165,21 @@ def etape_identification() -> None:
                 continue
             break
         axe.liberer()
+        if qui == "0":
+            # Montage partiel : un seul moteur branché. Accepté, ce driver est simplement ignoré.
+            noter(f"  · driver « {emplacement} » : aucun mandrin n'a tourné (moteur non branché ?)")
+            continue
         poste = cfg.POSTE_MERE if qui == "m" else cfg.POSTE_FILLE
         trouve[emplacement] = (poste, 0 if sens == "h" else 1)
 
     reels = [p for p, _ in trouve.values()]
-    if len(set(reels)) != 2:
+    if not reels:
+        raise SystemExit("  ✗ Aucun mandrin n'a tourné : alimentation des drivers, LED rouge, ENA, "
+                         "câbles moteur, DIP. Relancer après correction.")
+    if len(set(reels)) != len(reels):
         raise SystemExit(f"  ✗ Les deux drivers font tourner le même mandrin ({reels[0]}) : câblage à revoir.")
-    if trouve[cfg.POSTE_MERE][0] != cfg.POSTE_MERE:
+    branches[:] = sorted(set(reels), key=cfg.POSTES.index)
+    if any(poste != emplacement for emplacement, (poste, _) in trouve.items()):
         noter("  ⚠ Drivers INVERSÉS : le driver « mère » de config.py fait tourner la fille.")
         mere, fille = DRIVERS[cfg.POSTE_FILLE], DRIVERS[cfg.POSTE_MERE]
         for nom, valeur in (("PUL_MERE", mere["PUL"]), ("DIR_MERE", mere["DIR"]), ("ENA_MERE", mere["ENA"]),
@@ -179,7 +187,8 @@ def etape_identification() -> None:
             corriger(f"{nom} = {valeur}")
             setattr(cfg, nom, valeur)
     else:
-        noter("  ✓ Driver « mère » → mandrin mère, driver « fille » → mandrin fille.")
+        noter("  ✓ " + ", ".join(f"driver « {e} » → mandrin {p}" for e, (p, _) in trouve.items())
+              + " : conforme à config.py")
 
     for poste, niveau in trouve.values():
         actuel = cfg.DIR_VERS_HORAIRE[poste]
@@ -339,6 +348,7 @@ def etape_boutons(noms: tuple) -> None:
 # ═══════════════════════════════════════════════════════════════════════════
 
 DIR_ORIGINE = dict(cfg.DIR_VERS_HORAIRE)
+branches = []           # postes dont le moteur a tourné à l'étape 1
 SENS_PLUS_ORIGINE = dict(cfg.SENS_ROTATION_PLUS)
 try:
     depart = menu("Commencer à quelle étape ?", {"1": "identification des moteurs et sens",
@@ -347,7 +357,11 @@ try:
     noms = _commun.choisir_postes("Postes pour les étapes 2 à 4 ?") if depart != "1" else None
     if depart == "1":
         etape_identification()
-        noms = _commun.choisir_postes("Postes pour les étapes 2 à 4 ?")
+        noms = tuple(branches)
+        if len(noms) == 2:
+            noms = _commun.choisir_postes("Postes pour les étapes 2 à 4 ?")
+        else:
+            noter(f"  Un seul moteur branché : étapes 2 à 4 pour {noms[0]} seulement.")
     construire_axes()
     if depart in ("1", "2"):
         etape_butees(noms)

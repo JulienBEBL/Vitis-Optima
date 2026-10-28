@@ -277,6 +277,7 @@ MOTEUR_LARGEUR_IMPULSION_US = 50  # µs — état haut de PUL. Fiche : mini 2,5 
 # DOIT correspondre aux interrupteurs SW5..SW8 des deux drivers (voir la section
 # DRIVERS JK-DM860H en fin de fichier). Toute la géométrie en dépend.
 # 6400 pas/tr : 0,056° par pas ; à 10°/s, 178 pas/s par moteur.
+# Réglé sur les drivers le 2026-10-28.
 DRIVER_PAS_PAR_TOUR = 6400
 
 # Pas de réducteur : le moteur entraîne le mandrin en direct.
@@ -485,8 +486,8 @@ COMPTEURS_PERIODE_ECRITURE_S = 30.0
 #   SW4=OFF                        → demi-courant à l'arrêt (gardé le 2026-10-27 :
 #                                    le mandrin n'a pas besoin du plein couple en coupe)
 #   SW5=ON  SW6=ON  SW7=OFF SW8=ON → 6400 impulsions/tour (= DRIVER_PAS_PAR_TOUR)
-# ⚠ À CONFIRMER SUR L'ÉTIQUETTE DU DRIVER avant le premier mouvement
-#   (en V2 : 1600 pas/tr = ON/OFF/ON/ON, cohérent avec cette table).
+#                                    réglé sur les drivers par Julien le 2026-10-28
+# ⚠ Courant (SW1..SW3) et SW4 : à vérifier sur l'étiquette du driver.
 DRIVER_DIP_SWITCH = "11001101"
 DRIVER_COURANT_CRETE_A = 5.14
 

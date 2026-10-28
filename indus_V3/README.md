@@ -105,7 +105,10 @@ Avant tout : **régler et vérifier les DIP des drivers** (6400 pas/tr, 4,28 A R
 `test_greffon.py` fait toute la mise en service du poste fille seul, en 5 étapes : butées à la
 main, moteur (quel driver, sens), butées au moteur, remise à zéro et course totale, puis rotation
 avec les vrais boutons ROTATION ± (ACQUITTEMENT = retour au centre). Récapitulatif dans
-`logs/greffon_*.txt`. Avec les deux postes branchés, utiliser test_5 :
+`logs/greffon_*.txt`. Les tests 3, 5, 6, 7 et 8 acceptent aussi un seul poste : le menu demande
+quels postes sont branchés (test_5 : répondre « 0 = aucun » pour le driver sans moteur).
+
+Avec les deux postes branchés, `test_5_moteur.py` :
 
 `test_5_moteur.py` — mise en service, en quatre étapes enchaînées (le menu permet de
 reprendre à une étape) :
