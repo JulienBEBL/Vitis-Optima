@@ -69,6 +69,7 @@ validée avant la suivante.
 | 2026-10-27 | Dépassement possible à l'initialisation (plage nominale + marge) accepté. |
 | 2026-10-27 | LOGIQUE.md V3 validé (version 3.1). |
 | 2026-10-28 | Boutons relevés sur machine : 9 contacts NO, répartis sur 0x24 B, 0x26 A (COUPE mère, ACQUITTEMENT, ROTATION − fille). config.py désigne chaque bouton par (MCP, port, bit). I2C validé (test_1). |
+| 2026-10-28 | test_5 : greffon sur le DRIVER 1 (PUL 17, DIR GPA7, ENA GPB0), DIR vers horaire = 0. Mère sur le driver 2, provisoire (pas encore montée). Bug : la recherche de butée s'arrêtait à 1,5 × la plage nominale (195°) avant la butée → recherche par segments de 45° avec accord de l'opérateur, puis contrôle course comptée / course réelle (détecte un micropas différent). |
 | 2026-10-28 | Butées du greffon relevées (test_3) : HORAIRE = 0x26 GPB1, ANTIHORAIRE = GPB4, contacts NO. Mère provisoire sur GPB2 / GPB3. |
 | 2026-10-28 | SW4 = ON sur les drivers : plein courant à l'arrêt (et non demi-courant comme décidé le 2026-10-27). Surveiller l'échauffement des moteurs, excités en permanence. |
 | 2026-10-28 | Micropas des drivers réglé à 6400 pas/tr par Julien (= DRIVER_PAS_PAR_TOUR, inchangé dans le code). Tests 3, 5, 7, 8 utilisables avec un seul poste branché. |

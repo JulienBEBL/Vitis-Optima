@@ -216,9 +216,8 @@ def construire_axes() -> None:
 
 def etape_butees(noms: tuple) -> None:
     noter("\n  ÉTAPE 2 — BUTÉES")
-    budget = round((max(cfg.PLAGE_NOMINALE_DEG.values()) * 1.5) * cfg.PAS_PAR_DEGRE)
-    print(f"  Rotation à {BUTEE_VITESSE_DEG_S:.0f}°/s jusqu'à la butée HORAIRE, puis jusqu'à l'ANTIHORAIRE.")
-    print(f"  Borne de sécurité : {budget / cfg.PAS_PAR_DEGRE:.0f}° par trajet.")
+    print(f"  Rotation à {BUTEE_VITESSE_DEG_S:.0f}°/s jusqu'à la butée HORAIRE, puis jusqu'à l'ANTIHORAIRE,")
+    print(f"  par segments de {_commun.SEGMENT_RECHERCHE_DEG:.0f}° : le programme demande avant chaque segment.")
     for poste in noms:
         if not confirmer(f"Poste {poste.upper()} : lancer la recherche des butées ?"):
             continue
@@ -230,10 +229,10 @@ def etape_butees(noms: tuple) -> None:
         for sens in (H, A):
             niveau = cfg.DIR_VERS_HORAIRE[poste] if sens == H else cfg.DIR_VERS_ANTIHORAIRE[poste]
             print(f"    {poste} → {sens}…", end="", flush=True)
-            faits, vue, detection = tourner(axe, niveau, budget, BUTEE_VITESSE_DEG_S, siennes)
+            vue, detection = _commun.chercher_butee(
+                lambda pas, n=niveau: tourner(axe, n, pas, BUTEE_VITESSE_DEG_S, siennes), sens)
             if vue is None:
-                print(" rien")
-                noter(f"  ✗ {poste} : aucune butée vue en tournant {sens} sur {faits / cfg.PAS_PAR_DEGRE:.0f}° "
+                noter(f"  ✗ {poste} : aucune butée vue en tournant {sens} sur {detection / cfg.PAS_PAR_DEGRE:.0f}° "
                       "— capteur non câblé ou mort, ou mauvais sens de rotation (étape 1)")
                 axe.liberer()
                 raise SystemExit(1)
@@ -241,6 +240,7 @@ def etape_butees(noms: tuple) -> None:
             vues[sens] = (vue[1], detection)
             time.sleep(0.5)
         axe.liberer()
+        _commun.controler_course(poste, vues[A][1], noter, corriger)
         if vues[H][0] == H and vues[A][0] == A:
             noter(f"  ✓ {poste} : butées conformes ; plage ≈ {vues[A][1] / cfg.PAS_PAR_DEGRE:.1f}° "
                   "(mesure fine à l'étape 3)")

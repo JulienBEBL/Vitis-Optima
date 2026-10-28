@@ -118,8 +118,10 @@ MCP_ENTREES_GPPU = (0xFF, 0xFF)
 GPIO_CHIP_CANDIDATS = (4, 0)
 GPIO_CHIP_LIBELLE = "rp1"          # libellé attendu : « pinctrl-rp1 »
 
-PUL_MERE = 17      # PUL driver 1 → moteur mère   (confirmé PCB V4)
-PUL_FILLE = 27     # PUL driver 2 → moteur fille  (confirmé PCB V4)
+# Greffon (fille) branché sur le DRIVER 1 du PCB, relevé le 2026-10-28 (test_5).
+# Mère : driver 2, provisoire (moteur mère pas encore monté).
+PUL_FILLE = 17     # PUL driver 1 → moteur fille  (relevé le 2026-10-28)
+PUL_MERE = 27      # PUL driver 2 → moteur mère   (⚠ provisoire)
 BUZZER_GPIO = 26   # buzzer passif 5 V (confirmé PCB V4)
 
 # Relais pilotés en GPIO direct, présents sur le PCB, NON utilisés. Le
@@ -229,10 +231,10 @@ TOLERANCE_PERTE_CAPTEUR_S = 0.1          # ⚠ À AJUSTER si D5 intempestifs
 #   DIR driver n → port A bit (8 − n)   ← INVERSÉ
 #   ENA driver n → port B bit (n − 1)   ← direct
 
-DIR_MERE = 7     # driver 1 → GPA7   (confirmé en V2)
-DIR_FILLE = 6    # driver 2 → GPA6   (confirmé en V2)
-ENA_MERE = 0     # driver 1 → GPB0
-ENA_FILLE = 1    # driver 2 → GPB1
+DIR_FILLE = 7    # driver 1 → GPA7   (relevé le 2026-10-28)
+ENA_FILLE = 0    # driver 1 → GPB0
+DIR_MERE = 6     # driver 2 → GPA6   (⚠ provisoire, moteur mère pas encore monté)
+ENA_MERE = 1     # driver 2 → GPB1
 
 # ── Sémantique ENA sur le DM860H — PIÈGE ──────────────────────────────────
 # Le signal ENA du DM860H DÉSACTIVE le moteur quand il est actif. Étage de
@@ -251,7 +253,8 @@ ENA_MOTEUR_LIBRE = 1     # arbre libre
 # Niveau de DIR qui fait tourner le mandrin vers sa butée HORAIRE.
 # ⚠ À CONFIRMER (test_5_moteur.py) : si un poste part du mauvais côté,
 #   inverser SA valeur. En V2 les axes étaient montés en miroir.
-DIR_VERS_HORAIRE = {POSTE_MERE: 0, POSTE_FILLE: 1}
+# Fille : relevé le 2026-10-28 (test_5). Mère : ⚠ provisoire, à relever au montage.
+DIR_VERS_HORAIRE = {POSTE_MERE: 0, POSTE_FILLE: 0}
 DIR_VERS_ANTIHORAIRE = {poste: 1 - niveau for poste, niveau in DIR_VERS_HORAIRE.items()}
 
 # Sens dans lequel le bouton ROTATION + fait tourner le mandrin, par poste.

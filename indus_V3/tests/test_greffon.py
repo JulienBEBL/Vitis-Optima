@@ -275,9 +275,8 @@ def etape_butees_moteur() -> None:
     noter("\n  ÉTAPE 3 — BUTÉES AU MOTEUR")
     axe = etat["axe"] or construire_axe()
     etat["axe"] = axe
-    budget = round(cfg.PLAGE_NOMINALE_DEG[POSTE] * 1.5 * cfg.PAS_PAR_DEGRE)
-    print(f"  Rotation à {BUTEE_VITESSE_DEG_S:.0f}°/s vers HORAIRE puis ANTIHORAIRE, "
-          f"{budget / cfg.PAS_PAR_DEGRE:.0f}° au plus par trajet.")
+    print(f"  Rotation à {BUTEE_VITESSE_DEG_S:.0f}°/s vers HORAIRE puis ANTIHORAIRE, par segments de "
+          f"{_commun.SEGMENT_RECHERCHE_DEG:.0f}° : le programme demande avant chaque segment.")
     if not confirmer("Lancer ?"):
         return
     axe.exciter()
@@ -286,15 +285,17 @@ def etape_butees_moteur() -> None:
     for sens in (H, A):
         niveau = (cfg.DIR_VERS_HORAIRE if sens == H else cfg.DIR_VERS_ANTIHORAIRE)[POSTE]
         print(f"    → {sens}…", end="", flush=True)
-        faits, vue, detection = tourner(axe, niveau, budget, BUTEE_VITESSE_DEG_S)
+        vue, detection = _commun.chercher_butee(
+            lambda pas, n=niveau: tourner(axe, n, pas, BUTEE_VITESSE_DEG_S), sens)
         if vue is None:
-            print(" rien")
-            noter(f"  ✗ aucune butée vue en tournant {sens} sur {faits / cfg.PAS_PAR_DEGRE:.0f}° — capteur "
+            noter(f"  ✗ aucune butée vue en tournant {sens} sur {detection / cfg.PAS_PAR_DEGRE:.0f}° — capteur "
                   "débranché ou mort, ou sens de rotation faux (étape 2)")
             raise SystemExit(1)
         print(f" butée « {vue} » de config.py après {detection / cfg.PAS_PAR_DEGRE:.1f}°")
         vues[sens] = (vue, detection)
         time.sleep(0.5)
+    _commun.controler_course(POSTE, vues[A][1], noter,
+                             lambda ligne: corriger("PLAGE_NOMINALE_DEG", ligne))
     if vues[H][0] == H and vues[A][0] == A:
         noter(f"  ✓ la bonne butée arrête le moteur dans chaque sens ; plage ≈ "
               f"{vues[A][1] / cfg.PAS_PAR_DEGRE:.1f}° (mesure fine à l'étape 4)")

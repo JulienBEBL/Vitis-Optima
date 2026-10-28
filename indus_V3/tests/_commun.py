@@ -237,3 +237,60 @@ def choisir_postes(texte: str = "Poste(s) à tester ?") -> tuple:
 def nombre(texte: str, defaut: int) -> int:
     reponse = input(f"\n  {texte} [{defaut}] ? ").strip()
     return int(reponse) if reponse.isdigit() and int(reponse) > 0 else defaut
+
+
+SEGMENT_RECHERCHE_DEG = 45.0    # recherche de butée : on demande avant chaque nouveau segment
+
+
+def chercher_butee(tourner_segment, sens: str) -> tuple:
+    """Rotation par segments de SEGMENT_RECHERCHE_DEG jusqu'à une butée.
+
+    La plage réelle peut dépasser la plage nominale de config.py : au lieu
+    d'une borne fixe, on DEMANDE à l'opérateur avant chaque nouveau segment
+    (le mandrin n'a pas de joint tournant : c'est lui qui voit le tuyau).
+    `tourner_segment(pas)` → (pas faits, butée vue ou None, pas à la détection).
+    Renvoie (butée vue ou None, pas comptés jusqu'à la détection ou au dernier pas).
+    """
+    segment = round(SEGMENT_RECHERCHE_DEG * cfg.PAS_PAR_DEGRE)
+    total = 0
+    while True:
+        faits, vue, detection = tourner_segment(segment)
+        if vue is not None:
+            return vue, total + detection
+        total += faits
+        print(f" pas de butée après {total / cfg.PAS_PAR_DEGRE:.0f}°")
+        if not confirmer(f"Le mandrin peut-il tourner encore de {SEGMENT_RECHERCHE_DEG:.0f}° vers {sens} "
+                         "(tuyau compris) ?"):
+            return None, total
+        print(f"    → {sens}, suite…", end="", flush=True)
+
+
+def controler_course(poste: str, compte_pas: int, noter, corriger) -> None:
+    """Après un trajet butée à butée : compare la course comptée à la course réelle
+    vue par l'opérateur (détecte un micropas réglé différemment de config.py),
+    puis adopte la course comptée comme plage nominale si elle s'en écarte.
+    `corriger(ligne)` ajoute une ligne « à recopier dans config.py »."""
+    compte = compte_pas / cfg.PAS_PAR_DEGRE
+    texte = input(f"\n  Course comptée butée à butée : {compte:.0f}°. Course RÉELLE vue sur la machine, en "
+                  "degrés (Entrée = elle correspond) ? ").strip().replace(",", ".")
+    try:
+        reel = float(texte) if texte else None
+    except ValueError:
+        reel = None
+    if reel:
+        rapport = compte / reel
+        if abs(rapport - 1) > 0.15:
+            noter(f"  ⚠ {poste} : course comptée {compte:.0f}° pour {reel:.0f}° réels (×{rapport:.2f}). Le "
+                  f"driver fait sans doute {cfg.DRIVER_PAS_PAR_TOUR * rapport:.0f} pas/tr au lieu de "
+                  f"{cfg.DRIVER_PAS_PAR_TOUR} : vérifier SW5..SW8. Les degrés affichés sont faux d'autant.")
+            return
+        noter(f"  ✓ {poste} : course comptée {compte:.0f}° ≈ course réelle {reel:.0f}° : micropas conforme")
+    nominale = cfg.PLAGE_NOMINALE_DEG[poste]
+    if abs(compte - nominale) > 0.1 * nominale:
+        noter(f"  ⚠ {poste} : plage ≈ {compte:.0f}°, loin de la plage nominale {nominale:.0f}° de config.py "
+              "— adoptée pour la suite du test")
+        cfg.PLAGE_NOMINALE_DEG[poste] = round(compte, 1)
+        cfg.PLAGE_NOMINALE_PAS[poste] = compte_pas
+        cfg.BUDGET_RECHERCHE_RAPIDE_PAS[poste] = compte_pas + cfg.MARGE_DEPASSEMENT_PAS
+        corriger(f"PLAGE_NOMINALE_DEG = {{POSTE_MERE: {cfg.PLAGE_NOMINALE_DEG[cfg.POSTE_MERE]}, "
+                 f"POSTE_FILLE: {cfg.PLAGE_NOMINALE_DEG[cfg.POSTE_FILLE]}}}   (provisoire, affinée à l'étape suivante)")
