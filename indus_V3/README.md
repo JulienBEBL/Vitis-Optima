@@ -70,7 +70,9 @@ continue**. ACQUITTEMENT relance l'initialisation du poste en défaut.
 ## 4. Procédure de test sur machine
 
 Faire les étapes dans l'ordre. Ne passer à la suivante que si la précédente est bonne.
-Chaque script remet tout en sécurité en sortant, y compris sur `Ctrl+C`.
+Chaque script remet tout en sécurité en sortant, y compris sur `Ctrl+C`. Dans le terminal de
+Geany, `Ctrl+C` ferme la fenêtre et le résultat est perdu : les scripts s'arrêtent donc seuls
+(test_2, test_3 et la phase 3 de test_5 après un temps sans activité).
 Arrêt d'urgence à portée de main dès l'étape 4.3. Mandrins vides jusqu'au § 4.4.
 
 ### 4.1 Entrées — rien ne bouge
@@ -78,8 +80,8 @@ Arrêt d'urgence à portée de main dès l'étape 4.3. Mandrins vides jusqu'au �
 | # | Commande | À vérifier | Si c'est faux |
 |---|---|---|---|
 | 1 | `python3 tests/test_1_i2c.py` | 3 × « ✓ » et 3 × « configuration conforme » | câblage I2C, `i2cdetect -y 1` |
-| 2 | `python3 tests/test_2_boutons.py --attribution` | Les 9 boutons, dont les 2 ROTATION − sur le 0x26 GPA4 / GPA5 | recopier les `BTN_*` proposés |
-| 3 | `python3 tests/test_2_boutons.py` | Chaque bouton allume **son** voyant ; un appui maintenu compte **un** appui | — |
+| 2 | `python3 tests/test_2_boutons.py` | Programme guidé : il nomme les 9 boutons un par un, tu appuies puis relâches ; résultat (entrée, contact NO / NF) et lignes `BTN_*` à la fin, enregistrés dans `logs/boutons_*.txt` | recopier les `BTN_*` et `BOUTONS_ACTIFS_BAS` proposés |
+| 3 | `python3 tests/test_2_boutons.py --apercu` | Chaque bouton allume **son** voyant ; un appui maintenu compte **un** appui ; arrêt seul après 20 s sans appui | — |
 | 4 | `python3 tests/test_3_capteurs.py --attribution` | Les 4 butées, HORAIRE / ANTIHORAIRE **vues du côté opérateur** ; contact NO | recopier les `CAP_*` proposés |
 | 5 | `python3 tests/test_3_capteurs.py`, galet actionné, **débrancher le connecteur** | Le voyant **s'éteint** (repli sûr) | câblage NF au lieu de NO |
 

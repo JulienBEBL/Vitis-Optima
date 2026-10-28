@@ -27,12 +27,12 @@ PHASE 3 — BOUTONS ROTATION + / − (le vrai code du programme)
   Initialisation réelle du poste (deux butées en deux passes, puis centrage),
   puis tu tournes avec les VRAIS boutons ROTATION + et −, maintenus : rampe
   de démarrage, croisière, arrêt au relâchement, arrêt sur butée. La position
-  s'affiche en direct. Ctrl+C pour finir, puis dire si ROTATION + tourne dans
+  s'affiche en direct. Fin automatique après 30 s sans rotation, puis dire si ROTATION + tourne dans
   le sens voulu (SENS_ROTATION_PLUS).
   La phase 3 utilise le sens trouvé en phase 2, même si config.py n'est
   pas encore corrigé.
 
-Ctrl+C arrête le moteur à tout moment.
+Arrêt du moteur : relâcher le bouton, ou l'arrêt d'urgence. Ctrl+C l'arrête aussi, mais ferme la fenêtre de Geany.
 """
 
 import time
@@ -44,6 +44,7 @@ from libs.poste import ROTATION, Defaut
 
 PETIT_COUP_DEG = 2.0
 GRAND_COUP_DEG = 15.0
+ESSAI_INACTIVITE_S = 30.0   # phase 3 : fin automatique après ce temps sans rotation (Ctrl+C ferme Geany)
 H, A = cfg.SENS_HORAIRE, cfg.SENS_ANTIHORAIRE
 
 titre("TEST 5 — MOTEUR : SENS, BUTÉES, BOUTONS ROTATION")
@@ -188,10 +189,13 @@ try:
           f"centré à {poste.degres(poste.position)}")
 
     print("\n  Maintenir ROTATION + ou ROTATION − du poste : le mandrin tourne tant que le")
-    print("  bouton est tenu. Ctrl+C pour finir.\n")
-    while True:
+    print(f"  bouton est tenu. Fin automatique après {ESSAI_INACTIVITE_S:.0f} s sans rotation.\n")
+    derniere_activite = time.monotonic()
+    while time.monotonic() - derniere_activite < ESSAI_INACTIVITE_S:
         try:
             maintenant = time.monotonic()
+            if poste.etat == ROTATION:
+                derniere_activite = maintenant
             entrees.rafraichir(maintenant)
             for action in (ROTATION_PLUS, ROTATION_MOINS):
                 if entrees.appui(f"{action}_{nom}"):

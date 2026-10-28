@@ -11,7 +11,8 @@ Lecture seule : aucun relais, aucun ENA n'est écrit.
 APERÇU : un voyant par butée, selon config.py. Galet actionné = voyant allumé.
 Signale si les deux butées d'un même poste sont actives ensemble (ce serait un
 défaut D2). Sert aussi au test de débranchement : galet actionné, débrancher le
-connecteur → le voyant doit S'ÉTEINDRE. Ctrl+C pour le bilan.
+connecteur → le voyant doit S'ÉTEINDRE. Arrêt automatique après INACTIVITE_S
+sans aucun changement, puis bilan (dans Geany, Ctrl+C ferme la fenêtre).
 
 Mode ATTRIBUTION (à faire au premier montage de la V3 : les capteurs ont été
 déplacés sur la rotation du mandrin) : le script nomme une butée (« MÈRE —
@@ -41,6 +42,7 @@ from libs.entrees import Entrees
 PORTS = ("0x26 A", "0x26 B", "0x24 B")
 PERIODE_S = 0.01
 LECTURES_STABLES = 5      # un changement est retenu après 5 lectures identiques (50 ms)
+INACTIVITE_S = 20.0       # aperçu et mode direct : arrêt après ce temps sans changement
 
 CAPTEURS = (("CAP_MERE_HORAIRE", "MÈRE  — butée HORAIRE"),
             ("CAP_MERE_ANTIHORAIRE", "MÈRE  — butée ANTIHORAIRE"),
@@ -131,19 +133,21 @@ def mode_direct() -> None:
     depart = lire()
     bascules = {}
     precedent = dict(depart)
-    print("  Bits affichés 7654 3210. Ctrl+C pour le bilan.\n")
+    print(f"  Bits affichés 7654 3210. Arrêt automatique après {INACTIVITE_S:.0f} s sans changement.\n")
     print("  0x26 A      0x26 B      0x24 B      ont bougé")
+    dernier_changement = time.monotonic()
     try:
-        while True:
+        while time.monotonic() - dernier_changement < INACTIVITE_S:
             octets = lire()
             for port, bit in differences(precedent, octets):
                 bascules[(port, bit)] = bascules.get((port, bit), 0) + 1
+                dernier_changement = time.monotonic()
             precedent = octets
             liste = " ".join(f"{port.replace(' ', '')}{bit}" for (port, bit) in sorted(bascules))
             print("\r  " + "   ".join(bits(octets[port]) for port in PORTS) + f"   {liste:40s}",
                   end="", flush=True)
             time.sleep(0.02)
-    except KeyboardInterrupt:
+    finally:
         print("\n\n  Bilan — bits qui ont changé :")
         if not bascules:
             print("    aucun.")
@@ -158,22 +162,27 @@ def mode_apercu() -> None:
     entrees = Entrees(materiel.relais, materiel.entrees)
     vus = {cle: False for cle in cles}
     d2_vu = False
-    print("  Actionner les galets. Ctrl+C pour le bilan.\n")
+    print(f"  Actionner les galets. Arrêt automatique après {INACTIVITE_S:.0f} s sans changement.\n")
     print("  MÈRE anti.   MÈRE hor.    FILLE anti.  FILLE hor.    0x26 B")
+    dernier_changement = time.monotonic()
+    precedent = None
     try:
-        while True:
+        while time.monotonic() - dernier_changement < INACTIVITE_S:
             entrees.rafraichir(time.monotonic())
+            if entrees.octets["0x26_B"] != precedent:
+                precedent = entrees.octets["0x26_B"]
+                dernier_changement = time.monotonic()
             alerte = ""
             for poste in cfg.POSTES:
                 if all(entrees.butee(poste, sens).stable for sens in cfg.SENS):
-                    alerte = f"⚠ {poste} : LES DEUX actives (D2)"
+                    alerte = f"⚠ D2 {poste}"
                     d2_vu = True
             for cle in cles:
                 vus[cle] |= entrees.butees[cle].stable
             print("\r  " + "".join(f"    {voyant(entrees.butees[cle].stable)}       " for cle in cles)
-                  + f" {bits(entrees.octets['0x26_B'])}   {alerte:34s}", end="", flush=True)
+                  + f" {bits(entrees.octets['0x26_B'])}  {alerte:10s}", end="", flush=True)
             time.sleep(cfg.PERIODE_BOUCLE_S)
-    except KeyboardInterrupt:
+    finally:
         print("\n\n  Bilan :")
         for (poste, sens), vu in vus.items():
             print(f"    {poste:6s} {sens:12s} {'✓ vue active' if vu else '✗ jamais vue active'}")
