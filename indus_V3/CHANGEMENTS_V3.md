@@ -69,6 +69,7 @@ validée avant la suivante.
 | 2026-10-27 | Dépassement possible à l'initialisation (plage nominale + marge) accepté. |
 | 2026-10-27 | LOGIQUE.md V3 validé (version 3.1). |
 | 2026-10-28 | Boutons relevés sur machine : 9 contacts NO, répartis sur 0x24 B, 0x26 A (COUPE mère, ACQUITTEMENT, ROTATION − fille). config.py désigne chaque bouton par (MCP, port, bit). I2C validé (test_1). |
+| 2026-10-28 | SW4 = ON sur les drivers : plein courant à l'arrêt (et non demi-courant comme décidé le 2026-10-27). Surveiller l'échauffement des moteurs, excités en permanence. |
 | 2026-10-28 | Micropas des drivers réglé à 6400 pas/tr par Julien (= DRIVER_PAS_PAR_TOUR, inchangé dans le code). Tests 3, 5, 7, 8 utilisables avec un seul poste branché. |
 | 2026-10-28 | Montage partiel : moteur et 2 butées du greffon (fille) seuls branchés, EV non raccordées → test_greffon.py (mise en service complète d'un seul poste). |
 | 2026-10-28 | Tests lancés depuis Geany (F5) : menus au clavier au lieu des options en ligne de commande. test_5 réécrit en mise en service (moteur ↔ poste, sens, butées, remise à zéro, course), test_6 devient le réglage des vitesses et rampes (recherche vitesse max et rampe min). |

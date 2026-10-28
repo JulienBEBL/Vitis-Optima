@@ -483,12 +483,14 @@ COMPTEURS_PERIODE_ECRITURE_S = 30.0
 # Réglage proposé des DEUX drivers, SW1 → SW8 (1 = ON) :
 #   SW1=ON  SW2=ON  SW3=OFF        → 4,28 A RMS / 5,14 A crête (~85 % de 5,0 A ;
 #                                    monter à OFF/ON/OFF = 4,86 A RMS si décrochage)
-#   SW4=OFF                        → demi-courant à l'arrêt (gardé le 2026-10-27 :
-#                                    le mandrin n'a pas besoin du plein couple en coupe)
+#   SW4=ON                         → PLEIN courant à l'arrêt (réglé par Julien le
+#                                    2026-10-28). ⚠ Les moteurs restant excités en
+#                                    permanence, surveiller leur échauffement ; repasser
+#                                    SW4=OFF (demi-courant) s'ils chauffent trop.
 #   SW5=ON  SW6=ON  SW7=OFF SW8=ON → 6400 impulsions/tour (= DRIVER_PAS_PAR_TOUR)
 #                                    réglé sur les drivers par Julien le 2026-10-28
-# ⚠ Courant (SW1..SW3) et SW4 : à vérifier sur l'étiquette du driver.
-DRIVER_DIP_SWITCH = "11001101"
+# ⚠ Courant (SW1..SW3) : à vérifier sur l'étiquette du driver.
+DRIVER_DIP_SWITCH = "11011101"
 DRIVER_COURANT_CRETE_A = 5.14
 
 # Ce driver n'a PAS de sortie d'alarme : une panne n'est signalée que par sa
