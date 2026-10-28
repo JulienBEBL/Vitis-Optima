@@ -110,12 +110,20 @@ class Entrees:
         self.butees = {cle: Filtre(cfg.ANTI_REBOND_CAPTEUR_S) for cle in CABLAGE_BUTEES}
         # Derniers octets bruts lus — affichés par les scripts de test.
         self.octets = {"0x24_B": 0, "0x26_A": 0, "0x26_B": 0}
+        self._prochaine_lecture_24 = 0.0      # 0x24 lu au premier tour, puis à PERIODE_LECTURE_BOUTONS_S
 
     def rafraichir(self, maintenant: float) -> None:
-        """Deux transactions I2C : 0x26 (A+B en bloc) puis 0x24 port B."""
-        # Le 0x26 d'abord : il porte les butées, qui arrêtent les moteurs.
+        """0x26 (A+B en bloc) à CHAQUE appel ; 0x24 port B toutes les PERIODE_LECTURE_BOUTONS_S.
+
+        Les butées (0x26) arrêtent les moteurs : elles sont lues le plus souvent
+        possible. Les boutons du 0x24 n'ont pas besoin d'être lus à 1 kHz : entre
+        deux lectures, leur dernier octet est réutilisé (anti-rebond inchangé).
+        """
         octet_26a, octet_26b = self._mcp_entrees.lire_ports()
-        octet_24b = self._mcp_relais.lire_port(PORT_B)
+        octet_24b = self.octets["0x24_B"]
+        if maintenant >= self._prochaine_lecture_24:
+            octet_24b = self._mcp_relais.lire_port(PORT_B)
+            self._prochaine_lecture_24 = maintenant + cfg.PERIODE_LECTURE_BOUTONS_S
         self.octets = {"0x24_B": octet_24b, "0x26_A": octet_26a, "0x26_B": octet_26b}
 
         for cle, bit in CABLAGE_BUTEES.items():

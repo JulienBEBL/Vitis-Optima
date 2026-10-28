@@ -154,6 +154,30 @@ class Mcp23017:
 #  PUCE GPIO
 # ═══════════════════════════════════════════════════════════════════════════
 
+def frequence_bus_i2c() -> int | None:
+    """Vitesse du bus I2C réellement en service (Hz), lue dans le device tree, ou
+    None si introuvable. Réglée par dtparam=i2c_arm_baudrate dans config.txt."""
+    for chemin in (f"/sys/bus/i2c/devices/i2c-{cfg.I2C_BUS_ID}/of_node/clock-frequency",
+                   f"/sys/class/i2c-adapter/i2c-{cfg.I2C_BUS_ID}/of_node/clock-frequency"):
+        try:
+            with open(chemin, "rb") as fichier:
+                return int.from_bytes(fichier.read(4), "big")
+        except OSError:
+            continue
+    return None
+
+
+def verifier_frequence_bus_i2c() -> str | None:
+    """Message d'avertissement si le bus n'est pas à I2C_FREQUENCE_ATTENDUE_HZ, sinon None."""
+    frequence = frequence_bus_i2c()
+    if frequence == cfg.I2C_FREQUENCE_ATTENDUE_HZ:
+        return None
+    lu = "inconnue" if frequence is None else f"{frequence / 1000:.0f} kHz"
+    return (f"bus I2C à {lu}, attendu {cfg.I2C_FREQUENCE_ATTENDUE_HZ / 1000:.0f} kHz : ajouter "
+            f"« dtparam=i2c_arm_baudrate={cfg.I2C_FREQUENCE_ATTENDUE_HZ} » dans /boot/firmware/config.txt "
+            "puis redémarrer (lecture des butées plus lente sinon)")
+
+
 def ouvrir_puce_gpio() -> int:
     """Ouvre la puce RP1 et renvoie son handle lgpio.
 

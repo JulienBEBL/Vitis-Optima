@@ -29,7 +29,7 @@ import logging
 
 import config as cfg
 from libs.entrees import BRIDAGE, COUPE, ROTATION_MOINS, ROTATION_PLUS, Entrees
-from libs.moteur import Axe, periodes_rampe, periodes_vers_position
+from libs.moteur import Axe, periodes_rampe, periodes_vers_butee, periodes_vers_position
 
 log = logging.getLogger("vitis")
 
@@ -184,10 +184,12 @@ class Poste:
 
     def lancer_rotation(self, sens: str, bouton: str | None = None) -> None:
         """Rotation à la vitesse de croisière. `bouton` : arrêt à son relâchement ;
-        None : jusqu'à la butée (rodage). Bornée par la protection du tuyau."""
+        None : jusqu'à la butée (rodage). Ralentit d'elle-même à l'approche de la
+        butée (ZONE_APPROCHE_BUTEE). Bornée par la protection du tuyau."""
+        distance = self.plage - self.position if sens == cfg.SENS_HORAIRE else self.position
+        periodes, suite = periodes_vers_butee(distance, cfg.VITESSE_CROISIERE_SPS)
         self._demarrer(sens, _AU_RELACHEMENT if bouton else _SUR_BUTEE,
-                       self._budget_rotation(sens),
-                       periodes_rampe(cfg.VITESSE_CROISIERE_SPS), 1.0 / cfg.VITESSE_CROISIERE_SPS,
+                       self._budget_rotation(sens), periodes, suite,
                        bouton=bouton, code_budget="D1", code_inattendu="D5")
         self.etat = ROTATION
 
@@ -412,9 +414,17 @@ class Poste:
             self.detection_rapide[sens] = None
             self._recul(sens)
             return
-        self._demarrer(sens, _SUR_BUTEE, cfg.BUDGET_RECHERCHE_RAPIDE_PAS[self.nom],
-                       periodes_rampe(cfg.VITESSE_RECHERCHE_RAPIDE_SPS),
-                       1.0 / cfg.VITESSE_RECHERCHE_RAPIDE_SPS,
+        if self._cote == 0:
+            # Première butée : position inconnue, pas de ralentissement possible.
+            periodes = periodes_rampe(cfg.VITESSE_RECHERCHE_RAPIDE_SPS)
+            suite = 1.0 / cfg.VITESSE_RECHERCHE_RAPIDE_SPS
+        else:
+            # Seconde butée : à une plage de la première. On ralentit dès la plage
+            # nominale moins sa tolérance, pour arriver lentement même si la plage
+            # réelle est la plus courte acceptée.
+            distance = cfg.PLAGE_NOMINALE_PAS[self.nom] - cfg.PLAGE_TOLERANCE_PAS
+            periodes, suite = periodes_vers_butee(distance, cfg.VITESSE_RECHERCHE_RAPIDE_SPS)
+        self._demarrer(sens, _SUR_BUTEE, cfg.BUDGET_RECHERCHE_RAPIDE_PAS[self.nom], periodes, suite,
                        code_budget="D8", code_inattendu="D8")
 
     def _recul(self, sens: str) -> None:

@@ -24,6 +24,9 @@ sudo apt install python3-lgpio python3-smbus2
 - L'utilisateur doit être dans les groupes `gpio` et `i2c` (c'est le cas de l'utilisateur par défaut).
 - Vérifier la présence des trois MCP : `sudo i2cdetect -y 1` → `24`, `25`, `26`.
 
+- **Bus I2C à 400 kHz** : ajouter `dtparam=i2c_arm_baudrate=400000` dans
+  `/boot/firmware/config.txt`, puis redémarrer. test_1 et `main.py` affichent la vitesse en service.
+
 ## 2. Lancement
 
 ```bash

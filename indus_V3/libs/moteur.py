@@ -53,19 +53,55 @@ def _vitesse_rampe(t: float, v_depart: float, v_cible: float) -> float:
 
 
 @functools.lru_cache(maxsize=None)
-def periodes_rampe(v_cible_sps: float) -> tuple:
-    """Périodes (s) des pas d'une rampe VITESSE_DEMARRAGE → `v_cible_sps`.
+def _rampe(v_depart_sps: float, v_cible_sps: float) -> tuple:
+    """Périodes (s) des pas d'une rampe `v_depart_sps` → `v_cible_sps`.
 
     La rampe est découpée dans le TEMPS : chaque pas prend la vitesse de
-    l'instant où il part. Sa longueur en pas dépend donc de la vitesse visée.
+    l'instant où il part. Sa longueur en pas dépend donc des vitesses.
     """
     periodes = []
     t = 0.0
     while t < cfg.DUREE_RAMPE_ROTATION_S:
-        periode = 1.0 / _vitesse_rampe(t, cfg.VITESSE_DEMARRAGE_SPS, v_cible_sps)
+        periode = 1.0 / _vitesse_rampe(t, v_depart_sps, v_cible_sps)
         periodes.append(periode)
         t += periode
     return tuple(periodes)
+
+
+def periodes_rampe(v_cible_sps: float) -> tuple:
+    """Rampe de démarrage : VITESSE_DEMARRAGE → `v_cible_sps`."""
+    return _rampe(cfg.VITESSE_DEMARRAGE_SPS, v_cible_sps)
+
+
+def vider_cache() -> None:
+    """À appeler après un changement de vitesse ou de rampe (test_6 : réglage)."""
+    _rampe.cache_clear()
+
+
+def periodes_vers_butee(distance_pas: int, v_cible_sps: float) -> tuple:
+    """Profil d'une rotation vers une butée située à ≈ `distance_pas`.
+
+    Rampe de démarrage, croisière, puis rampe de RALENTISSEMENT qui atteint
+    VITESSE_APPROCHE_BUTEE à ZONE_APPROCHE_BUTEE avant la butée ; ensuite, vitesse
+    d'approche jusqu'au galet (ou jusqu'au budget de pas). Renvoie
+    (périodes, période de la suite) pour Axe.lancer_vers().
+
+    Trajet trop court pour monter à `v_cible_sps` et redescendre : la vitesse de
+    croisière baisse de 15 % en 15 % jusqu'à ce que les deux rampes tiennent ;
+    sinon, tout le trajet se fait à la vitesse d'approche.
+    """
+    v_approche = cfg.VITESSE_APPROCHE_BUTEE_SPS
+    lente = 1.0 / v_approche
+    fin_ralenti = distance_pas - cfg.ZONE_APPROCHE_BUTEE_PAS
+    v = v_cible_sps
+    while v > v_approche:
+        montee = periodes_rampe(v)
+        descente = tuple(reversed(_rampe(v_approche, v)))
+        palier = fin_ralenti - len(montee) - len(descente)
+        if palier >= 0:
+            return montee + (1.0 / v,) * palier + descente, lente
+        v *= 0.85
+    return periodes_rampe(v_approche), lente
 
 
 def periodes_vers_position(nombre_pas: int, v_cible_sps: float) -> tuple:

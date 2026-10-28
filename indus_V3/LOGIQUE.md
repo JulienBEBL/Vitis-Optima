@@ -170,7 +170,12 @@ butée (0 ou `plage`). Un écart au recalage supérieur à `ECART_RECALAGE_MAX_D
   - une butée devient active sur `CAPTEUR_LECTURES_ARRET` lectures brutes consécutives →
     arrêt **sans surcourse**, bip court, recalage de la position ;
   - le budget est épuisé → **D1** (§ 6).
-- Pas de rampe d'arrêt : à 10°/s, un pas-à-pas s'arrête net sans perdre de pas.
+- Pas de rampe d'arrêt au relâchement : à 10°/s, un pas-à-pas s'arrête net sans perdre de pas.
+- **Ralentissement à l'approche des butées** (2026-10-28) : la position étant connue, la
+  rotation ralentit d'elle-même (rampe en S) pour arriver à `VITESSE_APPROCHE_BUTEE_DEG_S`
+  sur les derniers `ZONE_APPROCHE_BUTEE_DEG`. Le dépassement après le galet ne dépend plus
+  de la vitesse de croisière. Même chose pour la passe rapide vers la seconde butée de
+  l'initialisation (ralentit dès la plage nominale moins sa tolérance).
 - Latence d'arrêt : 1 à 2 lectures à 250 Hz, soit 4 à 8 ms ≈ 0,04 à 0,08°.
 - Pas de garde après la rotation : l'opérateur doit pouvoir donner de petits coups pour
   ajuster. Les rebonds du relâchement ne relancent rien : il faut un nouveau **front
@@ -404,7 +409,8 @@ raccourcies et la pointe baisse, comme en V2. Une butée vue pendant ce mouvemen
 
 ## 9. Boucle principale
 
-**250 Hz, non bloquante, sans aucune attente** (§ 2.1).
+**1 kHz, non bloquante, sans aucune attente** (§ 2.1), bus I2C à 400 kHz (2026-10-28).
+Les butées (0x26) sont lues à chaque tour ; les boutons du 0x24 toutes les 4 ms.
 
 ```
 1. lire 0x26 (1 transaction, 2 octets)   → 4 butées, ACQUITTEMENT, 2 × ROTATION −

@@ -52,6 +52,8 @@ REGLAGES = {
     "3": ("durée de la rampe (s)", "DUREE_RAMPE_ROTATION_S", None),
     "4": ("vitesse passe rapide d'init (°/s)", "VITESSE_RECHERCHE_RAPIDE_DEG_S", "VITESSE_RECHERCHE_RAPIDE_SPS"),
     "5": ("vitesse de recentrage (°/s)", "VITESSE_RECENTRAGE_DEG_S", "VITESSE_RECENTRAGE_SPS"),
+    "6": ("zone d'approche des butées (°)", "ZONE_APPROCHE_BUTEE_DEG", "ZONE_APPROCHE_BUTEE_PAS"),
+    "7": ("vitesse d'approche des butées (°/s)", "VITESSE_APPROCHE_BUTEE_DEG_S", "VITESSE_APPROCHE_BUTEE_SPS"),
 }
 ORIGINE = {constante: getattr(cfg, constante) for _, constante, _ in REGLAGES.values()}
 
@@ -81,8 +83,9 @@ def appliquer(constante: str, valeur: float) -> None:
         if deg == constante:
             setattr(cfg, deg, valeur)
             if sps:
-                setattr(cfg, sps, valeur * cfg.PAS_PAR_DEGRE)
-    moteur.periodes_rampe.cache_clear()         # les rampes calculées dépendent des réglages
+                en_pas = valeur * cfg.PAS_PAR_DEGRE
+                setattr(cfg, sps, round(en_pas) if sps.endswith("_PAS") else en_pas)
+    moteur.vider_cache()                        # les rampes calculées dépendent des réglages
 
 
 titre("TEST 6 — RÉGLAGE DES VITESSES ET DES RAMPES")

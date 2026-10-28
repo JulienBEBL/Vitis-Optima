@@ -26,7 +26,7 @@ import config as cfg
 from libs.entrees import Entrees
 from libs.journal import Compteurs, configurer_journal
 from libs.machine import Machine
-from libs.materiel import Buzzer, Materiel
+from libs.materiel import Buzzer, Materiel, verifier_frequence_bus_i2c
 from libs.moteur import Axe, PortsDrivers
 from libs.poste import Poste
 
@@ -61,7 +61,10 @@ def _afficher_config(log):
     log.info("    coupe %.2f + %.2f + %.2f s, mandrin %.2f s, garde %.2f s",
              cfg.TEMPS_AVANT_COUPE_S, cfg.TEMPS_COUPE_S, cfg.TEMPS_APRES_COUPE_S,
              cfg.TEMPS_MANOEUVRE_MANDRIN_S, cfg.TEMPS_GARDE_APRES_ACTION_S)
-    log.info("    boucle %d Hz", cfg.FREQUENCE_BOUCLE_HZ)
+    log.info("    approche des butées : %.1f° avant, à %.1f°/s", cfg.ZONE_APPROCHE_BUTEE_DEG,
+             cfg.VITESSE_APPROCHE_BUTEE_DEG_S)
+    log.info("    boucle %d Hz (butées à chaque tour, boutons 0x24 toutes les %.0f ms)",
+             cfg.FREQUENCE_BOUCLE_HZ, cfg.PERIODE_LECTURE_BOUTONS_S * 1000)
 
 
 def _construire_machine(materiel: Materiel, compteurs=None) -> Machine:
@@ -81,6 +84,10 @@ def _construire_machine(materiel: Materiel, compteurs=None) -> Machine:
     return Machine(materiel, entrees, postes, drivers, buzzer, compteurs)
 
 
+# Retard de boucle signalé dans le journal (un tour lent retarde la lecture des butées).
+RETARD_SIGNALE_S = 0.010
+
+
 def _boucle(machine: Machine, log) -> None:
     """Cadence fixe, sans rattrapage : un tour en retard n'est pas rejoué."""
     periode = cfg.PERIODE_BOUCLE_S
@@ -94,7 +101,7 @@ def _boucle(machine: Machine, log) -> None:
             time.sleep(reste)
             continue
         maintenant = time.monotonic()
-        if reste < -5 * periode and maintenant >= prochain_avertissement:
+        if reste < -RETARD_SIGNALE_S and maintenant >= prochain_avertissement:
             # Un tour lent retarde la lecture des fins de course : à surveiller.
             log.warning("Boucle en retard de %.0f ms", -reste * 1000)
             prochain_avertissement = maintenant + 10.0
@@ -114,6 +121,9 @@ def main() -> int:
     log = configurer_journal()
     log.info("═══ Démarrage Vitis Optima indus V3 ═══")
     _afficher_config(log)
+    alerte_i2c = verifier_frequence_bus_i2c()
+    if alerte_i2c:
+        log.warning("ATTENTION : %s", alerte_i2c)
 
     # Les threads d'impulsions doivent récupérer le GIL dès que leur pas arrive
     # à échéance, pas 5 ms plus tard (valeur par défaut de Python).

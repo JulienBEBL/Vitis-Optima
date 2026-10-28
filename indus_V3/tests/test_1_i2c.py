@@ -13,9 +13,16 @@ chaque MCP.
 
 import _commun
 from _commun import cfg, titre
-from libs.materiel import BusI2C
+from libs.materiel import BusI2C, frequence_bus_i2c, verifier_frequence_bus_i2c
 
 titre("TEST 1 — BUS I2C ET MCP23017")
+
+frequence = frequence_bus_i2c()
+alerte = verifier_frequence_bus_i2c()
+if alerte:
+    print(f"  ⚠ {alerte}\n")
+else:
+    print(f"  ✓ bus I2C à {frequence / 1000:.0f} kHz\n")
 
 bus = BusI2C(cfg.I2C_BUS_ID)
 manquants = 0

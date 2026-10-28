@@ -76,7 +76,14 @@ def sens_oppose(sens: str) -> str:
 #  BUS I2C  (inchangé depuis la V2)
 # ═══════════════════════════════════════════════════════════════════════════
 
-I2C_BUS_ID = 1               # /dev/i2c-1 (100 kHz, fixé par le device tree)
+I2C_BUS_ID = 1               # /dev/i2c-1
+
+# Vitesse du bus, réglée HORS du programme, dans /boot/firmware/config.txt :
+#     dtparam=i2c_arm_baudrate=400000
+# puis redémarrer la Pi. À 400 kHz une lecture des butées prend ≈ 0,15 ms au lieu
+# de ≈ 0,5 ms : c'est ce qui permet la boucle à 1 kHz. main.py et test_1 affichent
+# la vitesse réellement en service et avertissent si elle diffère.
+I2C_FREQUENCE_ATTENDUE_HZ = 400_000
 
 # Politique d'erreur (LOGIQUE.md § 9) : I2C_RETRIES nouvelles tentatives sur
 # OSError, puis défaut D6 (les DEUX postes : le bus est commun). Le délai est
@@ -212,7 +219,7 @@ CAPTEURS_ACTIFS_BAS = True
 ANTI_REBOND_CAPTEUR_S = 0.02
 
 # Nombre de lectures brutes actives CONSÉCUTIVES pour arrêter le moteur. Filtre
-# un parasite isolé pour 4 ms de retard à 250 Hz (0,04° à 10°/s).
+# un parasite isolé pour 1 ms de retard à 1 kHz (0,01° à 10°/s).
 CAPTEUR_LECTURES_ARRET = 2
 
 # Délai maximal entre la détection de la butée et sa confirmation par
@@ -259,6 +266,7 @@ DIR_VERS_ANTIHORAIRE = {poste: 1 - niveau for poste, niveau in DIR_VERS_HORAIRE.
 
 # Sens dans lequel le bouton ROTATION + fait tourner le mandrin, par poste.
 # ROTATION − tourne dans le sens opposé. ⚠ À CHOISIR avec l'opérateur (test_5).
+# Fille : ROTATION + vers horaire validé le 2026-10-28 (test_5 étape 4).
 SENS_ROTATION_PLUS = {POSTE_MERE: SENS_HORAIRE, POSTE_FILLE: SENS_HORAIRE}
 
 # Le moteur étant excité en permanence, il n'y a plus de pause après ENA en
@@ -289,9 +297,9 @@ PAS_PAR_DEGRE = DRIVER_PAS_PAR_TOUR / 360.0
 # Plage de rotation butée ANTIHORAIRE ↔ butée HORAIRE attendue, par poste.
 # Mesurée à chaque initialisation ; la valeur mesurée est comparée à celle-ci.
 # ⚠ À MESURER (test_5_moteur.py, étape 3) — à reprendre à chaque déplacement d'un capteur.
-# Fille : ≈ 281,5° relevé au moteur le 2026-10-28 (test_5 étape 2), à affiner (étape 3).
+# Fille : 281,1° mesuré le 2026-10-28 (test_5 étape 3, 5 mesures, dispersion 0,11°).
 # Mère : ⚠ inconnue, mécanique pas encore montée.
-PLAGE_NOMINALE_DEG = {POSTE_MERE: 130.0, POSTE_FILLE: 281.5}
+PLAGE_NOMINALE_DEG = {POSTE_MERE: 130.0, POSTE_FILLE: 281.1}
 
 # Écart toléré entre plage mesurée et plage nominale. Au-delà → défaut D9.
 PLAGE_TOLERANCE_DEG = 15.0
@@ -367,6 +375,16 @@ TOLERANCE_CONFIRMATION_DEG = 10.0       # la passe lente doit retrouver la buté
 # (raccourcies si le trajet est court), arrêt sur le compte de pas.
 VITESSE_RECENTRAGE_DEG_S = 10.0         # ⚠ À AJUSTER
 
+# ── Approche des butées (demandé le 2026-10-28) ────────────────────────────
+# Dès que la position est connue (après l'initialisation), une rotation vers une
+# butée RALENTIT d'elle-même sur les derniers ZONE_APPROCHE_BUTEE_DEG : rampe en S
+# vers VITESSE_APPROCHE_BUTEE_DEG_S, puis arrivée lente sur le galet. Le
+# dépassement après le galet ne dépend plus de la vitesse de croisière
+# (≈ 0,01 à 0,04° à 3°/s). S'applique à la rotation aux boutons, au rodage et à la
+# passe rapide vers la seconde butée de l'initialisation (plage nominale connue).
+ZONE_APPROCHE_BUTEE_DEG = 8.0           # ⚠ À AJUSTER — degrés lents avant la butée
+VITESSE_APPROCHE_BUTEE_DEG_S = 3.0      # ⚠ À AJUSTER — vitesse sur le galet
+
 # Sens de la première butée recherchée à l'initialisation.
 INIT_PREMIER_SENS = SENS_ANTIHORAIRE
 
@@ -380,6 +398,7 @@ VITESSE_DEMARRAGE_SPS = VITESSE_DEMARRAGE_DEG_S * PAS_PAR_DEGRE
 VITESSE_RECHERCHE_RAPIDE_SPS = VITESSE_RECHERCHE_RAPIDE_DEG_S * PAS_PAR_DEGRE
 VITESSE_RECHERCHE_LENTE_SPS = VITESSE_RECHERCHE_LENTE_DEG_S * PAS_PAR_DEGRE
 VITESSE_RECENTRAGE_SPS = VITESSE_RECENTRAGE_DEG_S * PAS_PAR_DEGRE
+VITESSE_APPROCHE_BUTEE_SPS = VITESSE_APPROCHE_BUTEE_DEG_S * PAS_PAR_DEGRE
 VITESSE_MAX_SPS = max(VITESSE_CROISIERE_SPS, VITESSE_RECHERCHE_RAPIDE_SPS, VITESSE_RECENTRAGE_SPS)
 
 PLAGE_NOMINALE_PAS = {poste: _pas(degres) for poste, degres in PLAGE_NOMINALE_DEG.items()}
@@ -388,6 +407,7 @@ MARGE_DEPASSEMENT_PAS = _pas(MARGE_DEPASSEMENT_DEG)
 DEGAGEMENT_MAX_PAS = _pas(DEGAGEMENT_MAX_DEG)
 ECART_RECALAGE_MAX_PAS = _pas(ECART_RECALAGE_MAX_DEG)
 TOLERANCE_CENTRE_PAS = _pas(TOLERANCE_CENTRE_DEG)
+ZONE_APPROCHE_BUTEE_PAS = _pas(ZONE_APPROCHE_BUTEE_DEG)
 RECUL_CONFIRMATION_PAS = _pas(RECUL_CONFIRMATION_DEG)
 
 # BUDGETS DE PAS — bornes DURES, le thread s'arrête de lui-même au dernier pas.
@@ -430,10 +450,15 @@ TEMPS_GARDE_APRES_ROTATION_S = 0.0
 # ═══════════════════════════════════════════════════════════════════════════
 #  BOUCLE PRINCIPALE
 # ═══════════════════════════════════════════════════════════════════════════
-# 250 Hz : latence de décision 4 ms. Coût I2C ≈ 2 lectures + au plus 2
-# écritures par tour, ~25 % du bus. Aucune attente bloquante dans la boucle.
+# 1 kHz (bus I2C à 400 kHz) : les butées (0x26) sont lues À CHAQUE TOUR, soit
+# une latence de décision de 1 ms (2 lectures consécutives = 2 ms pour arrêter).
+# Les 6 boutons du 0x24 ne sont lus que toutes les PERIODE_LECTURE_BOUTONS_S :
+# un bouton n'a pas besoin d'être lu plus vite, et cela allège le bus.
+# Coût I2C ≈ 1000 lectures 0x26 + 250 lectures 0x24 par seconde, ~20 % du bus.
+# Aucune attente bloquante dans la boucle.
 
-FREQUENCE_BOUCLE_HZ = 250
+FREQUENCE_BOUCLE_HZ = 1000
+PERIODE_LECTURE_BOUTONS_S = 0.004       # 0x24 port B : 250 Hz
 PERIODE_BOUCLE_S = 1.0 / FREQUENCE_BOUCLE_HZ
 
 # Intervalle de bascule du GIL entre threads Python (défaut 5 ms). Réduit pour
@@ -615,6 +640,9 @@ def verifier_config() -> None:
         ("RECUL_CONFIRMATION_DEG", RECUL_CONFIRMATION_DEG),
         ("TOLERANCE_CONFIRMATION_DEG", TOLERANCE_CONFIRMATION_DEG),
         ("VITESSE_RECENTRAGE_DEG_S", VITESSE_RECENTRAGE_DEG_S),
+        ("ZONE_APPROCHE_BUTEE_DEG", ZONE_APPROCHE_BUTEE_DEG),
+        ("VITESSE_APPROCHE_BUTEE_DEG_S", VITESSE_APPROCHE_BUTEE_DEG_S),
+        ("PERIODE_LECTURE_BOUTONS_S", PERIODE_LECTURE_BOUTONS_S),
         ("MOTEUR_LARGEUR_IMPULSION_US", MOTEUR_LARGEUR_IMPULSION_US),
         ("MOTEUR_ENA_AVANT_DIR_S", MOTEUR_ENA_AVANT_DIR_S),
         ("MOTEUR_DIR_AVANT_PAS_S", MOTEUR_DIR_AVANT_PAS_S),
@@ -639,6 +667,11 @@ def verifier_config() -> None:
         erreurs.append(f"FREQUENCE_BOUCLE_HZ = {FREQUENCE_BOUCLE_HZ} — attendu entre 50 et 1000")
 
     # ── Cohérence des vitesses
+    if not VITESSE_APPROCHE_BUTEE_DEG_S <= VITESSE_CROISIERE_DEG_S:
+        erreurs.append("VITESSE_APPROCHE_BUTEE_DEG_S doit être <= VITESSE_CROISIERE_DEG_S")
+    for poste, degres in PLAGE_NOMINALE_DEG.items():
+        if ZONE_APPROCHE_BUTEE_DEG >= degres / 2:
+            erreurs.append(f"ZONE_APPROCHE_BUTEE_DEG >= la moitié de PLAGE_NOMINALE_DEG[{poste}]")
     if not VITESSE_DEMARRAGE_DEG_S < VITESSE_CROISIERE_DEG_S:
         erreurs.append("VITESSE_DEMARRAGE_DEG_S doit être < VITESSE_CROISIERE_DEG_S")
     if not VITESSE_RECHERCHE_LENTE_DEG_S < VITESSE_RECHERCHE_RAPIDE_DEG_S:
