@@ -36,7 +36,6 @@ import time
 
 import _commun
 from _commun import cfg, confirmer, menu, nombre, titre
-from libs import moteur
 from libs.poste import PRET, Defaut
 
 H, A = cfg.SENS_HORAIRE, cfg.SENS_ANTIHORAIRE
@@ -45,17 +44,7 @@ VITESSE_MAX_RECHERCHE_DEG_S = 90.0   # la recherche automatique ne va jamais au-
 RAMPE_MIN_RECHERCHE_S = 0.05
 MARGE_SECURITE = 0.7                 # vitesse proposée = 70 % de la dernière qui tient
 
-# Réglages modifiables : clé → (libellé, constante en degrés ou secondes, constante en pas/s ou None)
-REGLAGES = {
-    "1": ("vitesse de croisière (°/s)", "VITESSE_CROISIERE_DEG_S", "VITESSE_CROISIERE_SPS"),
-    "2": ("vitesse de démarrage (°/s)", "VITESSE_DEMARRAGE_DEG_S", "VITESSE_DEMARRAGE_SPS"),
-    "3": ("durée de la rampe (s)", "DUREE_RAMPE_ROTATION_S", None),
-    "4": ("vitesse passe rapide d'init (°/s)", "VITESSE_RECHERCHE_RAPIDE_DEG_S", "VITESSE_RECHERCHE_RAPIDE_SPS"),
-    "5": ("vitesse de recentrage (°/s)", "VITESSE_RECENTRAGE_DEG_S", "VITESSE_RECENTRAGE_SPS"),
-    "6": ("zone d'approche des butées (°)", "ZONE_APPROCHE_BUTEE_DEG", "ZONE_APPROCHE_BUTEE_PAS"),
-    "7": ("vitesse d'approche des butées (°/s)", "VITESSE_APPROCHE_BUTEE_DEG_S", "VITESSE_APPROCHE_BUTEE_SPS"),
-}
-ORIGINE = {constante: getattr(cfg, constante) for _, constante, _ in REGLAGES.values()}
+REGLAGES = _commun.REGLAGES_MOTEUR
 
 FICHIER = _commun.fichier_resultat("reglage")
 journal = [f"TEST 6 — réglage vitesses et rampes — {time.strftime('%Y-%m-%d %H:%M:%S')}, "
@@ -69,23 +58,10 @@ def noter(ligne: str) -> None:
 
 
 def lignes_config() -> list:
-    lignes = ["À recopier dans config.py :"]
-    for _, constante, _ in REGLAGES.values():
-        valeur = getattr(cfg, constante)
-        marque = "" if valeur == ORIGINE[constante] else f"   (était {ORIGINE[constante]})"
-        lignes.append(f"  {constante} = {valeur}{marque}")
-    return lignes
+    return _commun.lignes_reglages()
 
 
-def appliquer(constante: str, valeur: float) -> None:
-    """Change un réglage pour la suite du test (config.py n'est pas modifié)."""
-    for _, deg, sps in REGLAGES.values():
-        if deg == constante:
-            setattr(cfg, deg, valeur)
-            if sps:
-                en_pas = valeur * cfg.PAS_PAR_DEGRE
-                setattr(cfg, sps, round(en_pas) if sps.endswith("_PAS") else en_pas)
-    moteur.vider_cache()                        # les rampes calculées dépendent des réglages
+appliquer = _commun.appliquer_reglage
 
 
 titre("TEST 6 — RÉGLAGE DES VITESSES ET DES RAMPES")
@@ -234,19 +210,9 @@ try:
         if choix == "q":
             break
         if choix == "1":
-            cle = menu("Quel réglage ?", {c: libelle for c, (libelle, _, _) in REGLAGES.items()}, "1")
-            libelle, constante, _ = REGLAGES[cle]
-            texte = input(f"  Nouvelle valeur pour {libelle} [{getattr(cfg, constante)}] ? ").strip()
-            try:
-                valeur = float(texte.replace(",", ".")) if texte else getattr(cfg, constante)
-            except ValueError:
-                print("    valeur invalide")
-                continue
-            if valeur <= 0 or (constante == "VITESSE_DEMARRAGE_DEG_S" and valeur >= cfg.VITESSE_CROISIERE_DEG_S):
-                print("    refusé : doit être > 0, et la vitesse de démarrage < la croisière")
-                continue
-            appliquer(constante, valeur)
-            noter(f"  réglage : {constante} = {valeur}")
+            ligne = _commun.modifier_reglage()
+            if ligne:
+                noter(f"  réglage : {ligne}")
         elif choix == "2":
             serie(2 * nombre("Nombre d'allers-retours", 5),
                   f"ESSAI ROTATION à {cfg.VITESSE_CROISIERE_DEG_S}°/s, démarrage {cfg.VITESSE_DEMARRAGE_DEG_S}°/s, "

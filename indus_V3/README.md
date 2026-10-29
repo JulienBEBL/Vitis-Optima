@@ -85,6 +85,7 @@ Arrêt d'urgence à portée de main dès le § 4.3. Mandrins vides jusqu'au § 4
 | # | Test | À vérifier | Si c'est faux |
 |---|---|---|---|
 | 1 | `test_1_i2c.py` ✓ validé le 2026-10-28 | 3 × « ✓ » et 3 × « configuration conforme » | câblage I2C, `i2cdetect -y 1` |
+| 1b | `test_1b_i2c_stabilite.py` | Endurance du bus et des 3 MCP : erreurs, écriture/relecture, pertes de configuration, parasites sur les entrées, temps de lecture ; mode « bus seul » puis « bus + moteurs » ; verdict STABLE | câblage, découplage, masse, vitesse du bus |
 | 2 | `test_2_boutons.py`, menu 1 VALIDATION | Le programme nomme les 9 boutons, tu appuies (et maintiens 2 s les 4 ROTATION) ; « TOUT EST BON » à la fin | menu 2 ATTRIBUTION, recopier les `BTN_*` proposés |
 | 3 | `test_3_capteurs.py`, menu 2 ATTRIBUTION | Les 4 butées, HORAIRE / ANTIHORAIRE **vues du côté opérateur** ; contact NO | recopier les `CAP_*` proposés |
 | 4 | `test_3_capteurs.py`, menu 1 APERÇU, galet actionné, **débrancher le connecteur** | Le voyant **s'éteint** (repli sûr) | câblage NF au lieu de NO |
@@ -136,6 +137,7 @@ vitesse, par le retard de détection ; un décrochage le fait sauter au-delà de
 
 | # | Test | À vérifier | Si c'est faux |
 |---|---|---|---|
+| 15b | `test_9_rotation_libre.py` | Tourner aux boutons (deux postes), réglages modifiables en direct : vitesses, rampes, zone et vitesse d'approche des butées | recopier les réglages proposés |
 | 16 | `test_7_rodage.py` | Les deux moteurs ensemble ; écart de recalage stable ; retard max < 2 ms. Arrêt anticipé : ACQUITTEMENT | courant, rampe, vitesses (test_6) |
 
 ### 4.4 Cycle complet

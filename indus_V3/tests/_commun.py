@@ -297,3 +297,72 @@ def controler_course(poste: str, compte_pas: int, noter, corriger) -> None:
         cfg.BUDGET_RECHERCHE_RAPIDE_PAS[poste] = compte_pas + cfg.MARGE_DEPASSEMENT_PAS
         corriger(f"PLAGE_NOMINALE_DEG = {{POSTE_MERE: {cfg.PLAGE_NOMINALE_DEG[cfg.POSTE_MERE]}, "
                  f"POSTE_FILLE: {cfg.PLAGE_NOMINALE_DEG[cfg.POSTE_FILLE]}}}   (provisoire, affinée à l'étape suivante)")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  RÉGLAGES MOTEUR MODIFIABLES PENDANT UN TEST  (test_6, test_9)
+# ═══════════════════════════════════════════════════════════════════════════
+
+# clé de menu → (libellé, constante en degrés ou secondes, constante calculée ou None)
+REGLAGES_MOTEUR = {
+    "1": ("vitesse de croisière (°/s)", "VITESSE_CROISIERE_DEG_S", "VITESSE_CROISIERE_SPS"),
+    "2": ("vitesse de démarrage (°/s)", "VITESSE_DEMARRAGE_DEG_S", "VITESSE_DEMARRAGE_SPS"),
+    "3": ("durée des rampes (s)", "DUREE_RAMPE_ROTATION_S", None),
+    "4": ("vitesse passe rapide d'init (°/s)", "VITESSE_RECHERCHE_RAPIDE_DEG_S", "VITESSE_RECHERCHE_RAPIDE_SPS"),
+    "5": ("vitesse de recentrage (°/s)", "VITESSE_RECENTRAGE_DEG_S", "VITESSE_RECENTRAGE_SPS"),
+    "6": ("zone d'approche des butées (°)", "ZONE_APPROCHE_BUTEE_DEG", "ZONE_APPROCHE_BUTEE_PAS"),
+    "7": ("vitesse d'approche des butées (°/s)", "VITESSE_APPROCHE_BUTEE_DEG_S", "VITESSE_APPROCHE_BUTEE_SPS"),
+}
+ORIGINE_REGLAGES = {constante: getattr(cfg, constante) for _, constante, _ in REGLAGES_MOTEUR.values()}
+
+
+def appliquer_reglage(constante: str, valeur: float) -> None:
+    """Change un réglage pour la suite du test (config.py n'est pas modifié)."""
+    from libs import moteur
+    for _, deg, calculee in REGLAGES_MOTEUR.values():
+        if deg == constante:
+            setattr(cfg, deg, valeur)
+            if calculee:
+                en_pas = valeur * cfg.PAS_PAR_DEGRE
+                setattr(cfg, calculee, round(en_pas) if calculee.endswith("_PAS") else en_pas)
+    moteur.vider_cache()                        # les rampes calculées dépendent des réglages
+
+
+def afficher_reglages() -> None:
+    print("\n  Réglages actuels :")
+    for cle, (libelle, constante, _) in REGLAGES_MOTEUR.items():
+        print(f"    {cle}  {libelle:36s} {getattr(cfg, constante)}")
+
+
+def modifier_reglage() -> str | None:
+    """Menu : choisir un réglage et sa nouvelle valeur. Renvoie la ligne « CONSTANTE = valeur »
+    appliquée, ou None si rien n'a changé."""
+    cle = menu("Quel réglage ?", {c: libelle for c, (libelle, _, _) in REGLAGES_MOTEUR.items()}, "1")
+    libelle, constante, _ = REGLAGES_MOTEUR[cle]
+    texte = input(f"  Nouvelle valeur pour {libelle} [{getattr(cfg, constante)}] ? ").strip()
+    try:
+        valeur = float(texte.replace(",", ".")) if texte else getattr(cfg, constante)
+    except ValueError:
+        print("    valeur invalide")
+        return None
+    if valeur <= 0:
+        print("    refusé : doit être > 0")
+        return None
+    if constante == "VITESSE_DEMARRAGE_DEG_S" and valeur >= cfg.VITESSE_CROISIERE_DEG_S:
+        print("    refusé : la vitesse de démarrage doit rester < la croisière")
+        return None
+    if constante == "VITESSE_APPROCHE_BUTEE_DEG_S" and valeur > cfg.VITESSE_CROISIERE_DEG_S:
+        print("    refusé : la vitesse d'approche doit rester <= la croisière")
+        return None
+    appliquer_reglage(constante, valeur)
+    return f"{constante} = {valeur}"
+
+
+def lignes_reglages() -> list:
+    """Lignes « à recopier dans config.py » : tous les réglages, avec l'ancienne valeur si changée."""
+    lignes = ["À recopier dans config.py :"]
+    for _, constante, _ in REGLAGES_MOTEUR.values():
+        valeur = getattr(cfg, constante)
+        ancienne = ORIGINE_REGLAGES[constante]
+        lignes.append(f"  {constante} = {valeur}" + ("" if valeur == ancienne else f"   (était {ancienne})"))
+    return lignes
