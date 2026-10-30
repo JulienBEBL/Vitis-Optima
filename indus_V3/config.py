@@ -359,7 +359,7 @@ MOTEUR_RAMPES_EN_S = True
 # Passe RAPIDE : trouve la butée grossièrement (rampe de démarrage, pas de
 # rampe d'arrêt). Puis RECUL, puis passe LENTE de confirmation, qui fixe la
 # position de la butée.
-VITESSE_RECHERCHE_RAPIDE_DEG_S = 20.0   # ⚠ À AJUSTER — les deux moteurs ensemble = 711 pas/s,
+VITESSE_RECHERCHE_RAPIDE_DEG_S = 40.0   # choisi le 2026-10-30 — les deux moteurs ensemble = 1422 pas/s,
                                         # au-dessus des 600 pas/s tenus par un thread en V2 :
                                         # surveiller le « retard max » du journal aux essais
 VITESSE_RECHERCHE_LENTE_DEG_S = 3.0     # ⚠ À AJUSTER — arrêt en moins de 0,03° sur la butée
