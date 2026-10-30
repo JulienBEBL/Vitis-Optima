@@ -205,8 +205,8 @@ ANTI_REBOND_BOUTON_S = 0.05
 
 CAP_FILLE_HORAIRE = 1        # GPB1   relevé le 2026-10-28
 CAP_FILLE_ANTIHORAIRE = 4    # GPB4   relevé le 2026-10-28
-CAP_MERE_HORAIRE = 2         # GPB2   ⚠ à attribuer (test_poste)
-CAP_MERE_ANTIHORAIRE = 3     # GPB3   ⚠ à attribuer (test_poste)
+CAP_MERE_HORAIRE = 3         # GPB3   inversé le 2026-10-30, ⚠ à confirmer (test_poste)
+CAP_MERE_ANTIHORAIRE = 2     # GPB2   inversé le 2026-10-30, ⚠ à confirmer (test_poste)
 
 # Contact NO + pull-up : galet actionné = contact fermé = niveau BAS.
 # Fil coupé ou connecteur débranché = niveau HAUT = « pas en butée » :
