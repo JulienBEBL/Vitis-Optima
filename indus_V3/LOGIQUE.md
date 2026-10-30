@@ -76,7 +76,7 @@ et avant l'ouverture). Le retour du mandrin au centre ne se fait **que** sur ACQ
 
 ### 2.1 Deux threads d'impulsions en même temps
 
-À 6400 pas/tr et 10°/s, chaque moteur demande 178 pas/s, soit 356 pas/s pour les deux. La
+À 6400 pas/tr et 20°/s, chaque moteur demande 356 pas/s, soit 711 pas/s pour les deux. La
 V2 tenait 600 pas/s sur un seul thread : la charge est inférieure. Les deux réglages de
 l'interpréteur de la V2 (`sys.setswitchinterval`, `gc.freeze()`) sont gardés.
 
@@ -163,14 +163,14 @@ butée (0 ou `plage`). Un écart au recalage supérieur à `ECART_RECALAGE_MAX_D
 
 - Départ sur le **front d'appui** de ROTATION + ou −, après l'anti-rebond (50 ms).
 - Profil : démarrage à `VITESSE_DEMARRAGE`, montée en S jusqu'à `VITESSE_CROISIERE`
-  (10°/s) sur `DUREE_RAMPE_ROTATION_S`, puis croisière tant que le bouton est tenu.
+  (20°/s) sur `DUREE_RAMPE_ROTATION_S`, puis croisière tant que le bouton est tenu.
 - **Arrêt au pas suivant** dès que :
   - la **lecture brute** du bouton le voit relâché — sans anti-rebond, qui coûterait 0,5° ;
   - l'autre bouton de rotation du poste est enfoncé (lecture brute) ;
   - une butée devient active sur `CAPTEUR_LECTURES_ARRET` lectures brutes consécutives →
     arrêt **sans surcourse**, bip court, recalage de la position ;
   - le budget est épuisé → **D1** (§ 6).
-- Pas de rampe d'arrêt au relâchement : à 10°/s, un pas-à-pas s'arrête net sans perdre de pas.
+- Pas de rampe d'arrêt au relâchement : à 20°/s, un pas-à-pas s'arrête net sans perdre de pas.
 - **Ralentissement à l'approche des butées** (2026-10-28) : la position étant connue, la
   rotation ralentit d'elle-même (rampe en S) pour arriver à `VITESSE_APPROCHE_BUTEE_DEG_S`
   sur les derniers `ZONE_APPROCHE_BUTEE_DEG`. Le dépassement après le galet ne dépend plus
@@ -373,7 +373,7 @@ PUL mère = 17, PUL fille = 27, buzzer = 26, relais directs 16 et 20 réservés 
 ### 8.1 Géométrie
 
 `DRIVER_PAS_PAR_TOUR = 6400`, pas de réducteur → **17,8 pas par degré**, 0,056° par pas.
-À 10°/s : 178 pas/s. Plage nominale 281,1° ≈ 4998 pas.
+À 20°/s : 356 pas/s. Plage nominale 281,1° ≈ 4998 pas.
 
 ### 8.2 Rotation au maintien et recherche de butée
 

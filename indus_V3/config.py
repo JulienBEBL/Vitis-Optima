@@ -346,9 +346,9 @@ TOLERANCE_CENTRE_DEG = 0.5
 # net sans perdre de pas, et l'arrêt doit être immédiat (précision).
 
 # ── Rotation au maintien (boutons ROTATION + / −) ──────────────────────────
-VITESSE_CROISIERE_DEG_S = 10.0      # ⚠ À AJUSTER — demandé le 2026-10-27
+VITESSE_CROISIERE_DEG_S = 20.0      # choisi sur machine le 2026-10-30 (test_9)
 VITESSE_DEMARRAGE_DEG_S = 1.0       # ⚠ À AJUSTER — vitesse du premier pas
-DUREE_RAMPE_ROTATION_S = 1.0        # ⚠ À AJUSTER — montée douce et longue, DEMARRAGE → CROISIERE
+DUREE_RAMPE_ROTATION_S = 2.0        # choisi le 2026-10-30 — montée douce et longue, DEMARRAGE → CROISIERE
 
 # True  : rampes « en S » (demi-cosinus), pente nulle aux deux bouts : moins
 #         d'à-coups, moins de vibrations (choix de la V2, gardé).
