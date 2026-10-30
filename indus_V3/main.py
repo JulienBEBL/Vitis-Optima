@@ -4,7 +4,7 @@
 main.py — Point d'entrée de la Vitis Optima indus V3.
 
     Lancement :  python3 main.py
-    Arrêt :      Ctrl+C, ou systemctl stop
+    Arrêt :      Ctrl+C, fermeture de la fenêtre (Geany), ou systemctl stop
 
 La logique est décrite dans LOGIQUE.md, les paramètres sont dans config.py.
 Ce fichier ne fait que quatre choses :
@@ -111,6 +111,10 @@ def _boucle(machine: Machine, log) -> None:
 def main() -> int:
     signal.signal(signal.SIGINT, _handler_arret)     # Ctrl+C
     signal.signal(signal.SIGTERM, _handler_arret)    # systemctl stop
+    if hasattr(signal, "SIGHUP"):
+        # Fenêtre de Geany fermée : sans ceci, Python s'arrête net, sans le `finally`,
+        # et les relais et les moteurs restent dans leur dernier état.
+        signal.signal(signal.SIGHUP, _handler_arret)
 
     try:
         cfg.verifier_config()

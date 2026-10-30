@@ -224,5 +224,6 @@ class Machine:
         for poste in self.postes.values():
             if not poste.axe.attendre_fin(cfg.ARRET_THREAD_MAX_S):
                 log.error("%s : le thread d'impulsions ne s'arrête pas", poste.nom)
+            log.info("%s : retard max des impulsions %.1f ms", poste.nom, poste.axe.retard_max_s * 1000)
         self._buzzer.couper()
         self._compteurs.sauver()
