@@ -21,7 +21,7 @@ de l'autre. Chacun possède :
 - une **coupe** (EV 1 bobine) — descend la lame puis la remonte ;
 - un **moteur** NEMA 24 (StepperOnline 24IP65-30, driver JK-DM860H), arbre parallèle au
   sol, qui fait **tourner le mandrin** entre deux butées, **HORAIRE** et **ANTIHORAIRE**,
-  chacune matérialisée par une fin de course. Plage ≈ 130° ⚠ ;
+  chacune matérialisée par une fin de course. Plage ≈ 281° (fille mesurée, mère ⚠ théorique) ;
 - un **guide de translation** sur lequel l'opérateur avance et recule le bloc moteur **à
   la main**. Aucun capteur : le logiciel ne connaît pas la position du bloc.
 
@@ -147,7 +147,7 @@ Sur ACQUITTEMENT, depuis ATTENTE_ACQUITTEMENT ou DEFAUT. Les deux postes s'initi
    `VITESSE_RECENTRAGE`.
 7. Double bip, journal (plage mesurée, écart passe rapide / passe lente) → **PRET**.
 
-Durée au pire (plage 130°, départ sur la seconde butée, passes à 20°/s et 3°/s, recul 5°,
+Durée au pire (exemple avec une plage de 130°, départ sur la seconde butée, passes à 20°/s et 3°/s, recul 5°,
 centrage à 10°/s) : 2 × (6,5 s + 0,5 s + 1,7 s) + 6,5 s ≈ 24 s.
 
 ### 3.2 Repère de position
@@ -373,7 +373,7 @@ PUL mère = 17, PUL fille = 27, buzzer = 26, relais directs 16 et 20 réservés 
 ### 8.1 Géométrie
 
 `DRIVER_PAS_PAR_TOUR = 6400`, pas de réducteur → **17,8 pas par degré**, 0,056° par pas.
-À 10°/s : 178 pas/s. Plage nominale 130° ≈ 2311 pas ⚠.
+À 10°/s : 178 pas/s. Plage nominale 281,1° ≈ 4998 pas.
 
 ### 8.2 Rotation au maintien et recherche de butée
 

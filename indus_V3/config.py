@@ -18,7 +18,7 @@ Deux postes « mère » et « fille », TOTALEMENT INDÉPENDANTS. Chacun possèd
     pneumatique serre la branche : c'est le bridage)
   - 1 EV de COUPE,   1 bobine : bobine coupée = LAME HAUTE
   - 1 moteur NEMA 24 (StepperOnline 24IP65-30) + driver JK-DM860H qui fait
-    TOURNER le mandrin entre deux butées : HORAIRE et ANTIHORAIRE (≈ 130°)
+    TOURNER le mandrin entre deux butées : HORAIRE et ANTIHORAIRE (≈ 281°)
   - 4 boutons : BRIDAGE, ROTATION +, ROTATION −, COUPE
 Plus 1 bouton ACQUITTEMENT commun et 1 buzzer. Aucun voyant.
 Le bloc moteur se déplace à la main sur un guide de translation : aucun capteur.
@@ -126,7 +126,7 @@ GPIO_CHIP_CANDIDATS = (4, 0)
 GPIO_CHIP_LIBELLE = "rp1"          # libellé attendu : « pinctrl-rp1 »
 
 # Greffon (fille) branché sur le DRIVER 1 du PCB, relevé le 2026-10-28 (test_5).
-# Mère : driver 2, provisoire (moteur mère pas encore monté).
+# Mère : driver 2, ⚠ à confirmer (moteur branché le 2026-10-30, test_poste).
 PUL_FILLE = 17     # PUL driver 1 → moteur fille  (relevé le 2026-10-28)
 PUL_MERE = 27      # PUL driver 2 → moteur mère   (⚠ provisoire)
 BUZZER_GPIO = 26   # buzzer passif 5 V (confirmé PCB V4)
@@ -201,12 +201,12 @@ ANTI_REBOND_BOUTON_S = 0.05
 # bits datent du même instant — le contrôle « deux butées actives » (D2) porte
 # sur une photo cohérente.
 # Greffon (fille) : relevé sur machine le 2026-10-28 (test_3, attribution), contacts NO.
-# Mère : butées pas encore branchées — bits restants, PROVISOIRES.
+# Mère : butées branchées le 2026-10-30, bits ⚠ à attribuer (test_poste, étape 1).
 
 CAP_FILLE_HORAIRE = 1        # GPB1   relevé le 2026-10-28
 CAP_FILLE_ANTIHORAIRE = 4    # GPB4   relevé le 2026-10-28
-CAP_MERE_HORAIRE = 2         # GPB2   ⚠ provisoire, à attribuer au branchement (test_3)
-CAP_MERE_ANTIHORAIRE = 3     # GPB3   ⚠ provisoire, à attribuer au branchement (test_3)
+CAP_MERE_HORAIRE = 2         # GPB2   ⚠ à attribuer (test_poste)
+CAP_MERE_ANTIHORAIRE = 3     # GPB3   ⚠ à attribuer (test_poste)
 
 # Contact NO + pull-up : galet actionné = contact fermé = niveau BAS.
 # Fil coupé ou connecteur débranché = niveau HAUT = « pas en butée » :
@@ -240,7 +240,7 @@ TOLERANCE_PERTE_CAPTEUR_S = 0.1          # ⚠ À AJUSTER si D5 intempestifs
 
 DIR_FILLE = 7    # driver 1 → GPA7   (relevé le 2026-10-28)
 ENA_FILLE = 0    # driver 1 → GPB0
-DIR_MERE = 6     # driver 2 → GPA6   (⚠ provisoire, moteur mère pas encore monté)
+DIR_MERE = 6     # driver 2 → GPA6   (⚠ à confirmer, test_poste)
 ENA_MERE = 1     # driver 2 → GPB1
 
 # ── Sémantique ENA sur le DM860H — PIÈGE ──────────────────────────────────
@@ -260,7 +260,7 @@ ENA_MOTEUR_LIBRE = 1     # arbre libre
 # Niveau de DIR qui fait tourner le mandrin vers sa butée HORAIRE.
 # ⚠ À CONFIRMER (test_5_moteur.py) : si un poste part du mauvais côté,
 #   inverser SA valeur. En V2 les axes étaient montés en miroir.
-# Fille : relevé le 2026-10-28 (test_5). Mère : ⚠ provisoire, à relever au montage.
+# Fille : relevé le 2026-10-28 (test_5). Mère : ⚠ à relever (test_poste).
 DIR_VERS_HORAIRE = {POSTE_MERE: 0, POSTE_FILLE: 0}
 DIR_VERS_ANTIHORAIRE = {poste: 1 - niveau for poste, niveau in DIR_VERS_HORAIRE.items()}
 
@@ -298,8 +298,8 @@ PAS_PAR_DEGRE = DRIVER_PAS_PAR_TOUR / 360.0
 # Mesurée à chaque initialisation ; la valeur mesurée est comparée à celle-ci.
 # ⚠ À MESURER (test_5_moteur.py, étape 3) — à reprendre à chaque déplacement d'un capteur.
 # Fille : 281,1° mesuré le 2026-10-28 (test_5 étape 3, 5 mesures, dispersion 0,11°).
-# Mère : ⚠ inconnue, mécanique pas encore montée.
-PLAGE_NOMINALE_DEG = {POSTE_MERE: 130.0, POSTE_FILLE: 281.1}
+# Mère : ⚠ théorique, même mécanique que la fille (branchée le 2026-10-30, à mesurer).
+PLAGE_NOMINALE_DEG = {POSTE_MERE: 281.1, POSTE_FILLE: 281.1}
 
 # Écart toléré entre plage mesurée et plage nominale. Au-delà → défaut D9.
 PLAGE_TOLERANCE_DEG = 15.0

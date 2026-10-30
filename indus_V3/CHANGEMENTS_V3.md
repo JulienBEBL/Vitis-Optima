@@ -27,7 +27,7 @@ validée avant la suivante.
 | Boutons par poste | 3 : BRIDAGE, COUPE, POSITION | **4 : BRIDAGE, ROTATION +, ROTATION −, COUPE** → 8 boutons + ACQUITTEMENT. ⚠ attribution (test_2) |
 | Câblage des boutons | 0x24 B0..B5 + ACQUITTEMENT 0x26 B0 | **relevé le 2026-10-28** : 0x24 B0..B5 + 0x26 A5..A7 (voir LOGIQUE.md § 7) |
 | Mécanique | moteur entre 2 positions (coupe / ligaturage) | moteur à arbre **parallèle au sol**, sur un **guide de translation déplacé à la main** (aucun capteur) ; il fait tourner le mandrin |
-| Fins de course | 2 par axe : COUPE / LIGATURAGE | 2 par axe, déplacées : **butées HORAIRE / ANTIHORAIRE** de la rotation du mandrin, plage ≈ 130° ⚠. Même câblage, contact NO actif bas. ⚠ attribution (test_3) |
+| Fins de course | 2 par axe : COUPE / LIGATURAGE | 2 par axe, déplacées : **butées HORAIRE / ANTIHORAIRE** de la rotation du mandrin, plage ≈ 281°. Même câblage, contact NO actif bas. ⚠ attribution (test_3) |
 | Moteurs | NEMA 34 | **NEMA 24 StepperOnline 24IP65-30** : 3 N·m, 5,0 A, IP65. Pas de réducteur |
 | Drivers | JK-DM860H, 1600 pas/tr, 5,43 A RMS | **mêmes drivers**, micropas et courant à revoir (§ 4.4) |
 | Maintien | moteurs excités en position | **inchangé** : toujours excités en position |
@@ -76,7 +76,8 @@ validée avant la suivante.
 | 2026-10-28 | Butées du greffon relevées (test_3) : HORAIRE = 0x26 GPB1, ANTIHORAIRE = GPB4, contacts NO. Mère provisoire sur GPB2 / GPB3. |
 | 2026-10-28 | SW4 = ON sur les drivers : plein courant à l'arrêt (et non demi-courant comme décidé le 2026-10-27). Surveiller l'échauffement des moteurs, excités en permanence. |
 | 2026-10-28 | Micropas des drivers réglé à 6400 pas/tr par Julien (= DRIVER_PAS_PAR_TOUR, inchangé dans le code). Tests 3, 5, 7, 8 utilisables avec un seul poste branché. |
-| 2026-10-28 | Montage partiel : moteur et 2 butées du greffon (fille) seuls branchés, EV non raccordées → test_greffon.py (mise en service complète d'un seul poste). |
+| 2026-10-28 | Montage partiel : moteur et 2 butées du greffon (fille) seuls branchés, EV non raccordées → test_greffon.py, devenu test_poste.py. |
+| 2026-10-30 | Moteur et butées de la mère branchés. Course mère = course fille en théorie : PLAGE_NOMINALE_DEG mère passe de 130° à 281,1° (à 130°, budget de 140° : D8 à chaque recherche de butée). test_greffon.py devient test_poste.py, avec choix du poste ; il ne modifie plus les butées de l'autre poste. |
 | 2026-10-28 | Tests lancés depuis Geany (F5) : menus au clavier au lieu des options en ligne de commande. test_5 réécrit en mise en service (moteur ↔ poste, sens, butées, remise à zéro, course), test_6 devient le réglage des vitesses et rampes (recherche vitesse max et rampe min). |
 | 2026-10-28 | Tests utilisables depuis Geany : plus besoin de Ctrl+C (qui ferme la fenêtre), résultats enregistrés dans logs/. |
 | 2026-10-27 | Trouvé sur banc logiciel : le recul de confirmation est compté depuis le relâchement de la butée (sinon D4 à tort après un D1). |
@@ -121,7 +122,7 @@ chaque passage sur une butée.
 
 - Si le compteur dépasse la plage mesurée + une marge (≈ 10°) sans voir le capteur →
   **arrêt et défaut du poste** (équivalent du D1 de la V2).
-- À l'initialisation, la plage mesurée est comparée à la plage attendue (≈ 130° ± tolérance)
+- À l'initialisation, la plage mesurée est comparée à la plage attendue (≈ 281° ± tolérance)
   → hors tolérance : **défaut du poste**.
 
 ### 4.4 Drivers

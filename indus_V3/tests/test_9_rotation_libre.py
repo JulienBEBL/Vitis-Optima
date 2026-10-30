@@ -2,7 +2,7 @@
 """
 test_9_rotation_libre.py — Tourner les mandrins avec les boutons, et régler les mouvements.
 
-⚠ CE TEST FAIT TOURNER LES MOTEURS. Mandrins vides. test_5 (ou test_greffon)
+⚠ CE TEST FAIT TOURNER LES MOTEURS. Mandrins vides. test_5 (ou test_poste)
    validé d'abord : sens, butées, plage dans config.py.
 
 Lancer depuis Geany (F5). Seuls les moteurs sont pilotés : pas d'électrovanne

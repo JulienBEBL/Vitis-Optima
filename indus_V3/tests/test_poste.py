@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-test_greffon.py — Mise en service complète du poste GREFFON seul (poste « fille »).
+test_poste.py — Mise en service complète d'UN poste, au choix : mère ou fille (greffon).
 
-Pour l'étape de montage où un seul moteur et deux butées sont branchés : ceux du
-greffon. Le moteur et les butées de l'autre poste peuvent être absents. Les
-électrovannes ne sont pas pilotées (relais à 0 du début à la fin).
+Le menu demande quel poste. Le moteur et les butées de l'autre poste peuvent être
+absents, et ses réglages de config.py ne sont jamais modifiés (sauf si les deux
+drivers sont croisés). Les électrovannes ne sont pas pilotées (relais à 0 du début
+à la fin).
 
-⚠ CE TEST FAIT TOURNER LE MOTEUR DU GREFFON. Arrêt d'urgence à portée de main,
+⚠ CE TEST FAIT TOURNER LE MOTEUR DU POSTE. Arrêt d'urgence à portée de main,
    mandrin vide. DIP du driver vérifiés (6400 pas/tr, DRIVER_DIP_SWITCH).
 
 Lancer depuis Geany (F5). Tout se fait au clavier, le programme se termine
@@ -17,10 +18,11 @@ même si config.py n'est pas encore corrigé. Un menu permet de reprendre à une
 ÉTAPE 1 — BUTÉES À LA MAIN (moteur arrêté)
   Tu actionnes à la main le galet de la butée HORAIRE (vue côté opérateur),
   puis celui de l'ANTIHORAIRE. Le programme note le bit de chacune et vérifie
-  le contact NO. → CAP_* du greffon.
+  le contact NO. Les bits de l'autre poste sont ignorés. → CAP_* du poste.
 ÉTAPE 2 — MOTEUR
-  Petit aller-retour lent (IDENT_DEG). Tu dis si le moteur du greffon a tourné
-  et dans quel sens. S'il n'a pas tourné, le programme essaie l'autre driver.
+  Petit aller-retour lent (IDENT_DEG). Tu dis si le moteur du poste a tourné
+  et dans quel sens. S'il n'a pas tourné, le programme propose d'essayer l'autre
+  driver (qui fait bouger l'autre poste s'il est branché).
   → correspondance du driver, DIR_VERS_HORAIRE.
 ÉTAPE 3 — BUTÉES AU MOTEUR
   Rotation lente vers HORAIRE jusqu'à la butée, puis vers ANTIHORAIRE : la bonne
@@ -29,12 +31,12 @@ même si config.py n'est pas encore corrigé. Un menu permet de reprendre à une
   Initialisation réelle du programme (passe rapide, recul, passe lente de chaque
   côté, centrage), répétée. → PLAGE_NOMINALE_DEG.
 ÉTAPE 5 — TOURNER AVEC LES BOUTONS
-  ROTATION + / − du greffon, maintenus ; ACQUITTEMENT = retour au centre. La
+  ROTATION + / − du poste, maintenus ; ACQUITTEMENT = retour au centre. La
   position s'affiche. Fin automatique après LIBRE_INACTIVITE_S sans rien toucher.
   → SENS_ROTATION_PLUS.
 
 À la fin : RÉCAPITULATIF avec les lignes à recopier dans config.py, ENREGISTRÉ
-dans logs/greffon_<date>_<heure>.txt (réécrit à chaque étape).
+dans logs/poste_<poste>_<date>_<heure>.txt (réécrit à chaque étape).
 """
 
 import time
@@ -47,8 +49,6 @@ from libs.materiel import Buzzer
 from libs.moteur import Axe, PortsDrivers, periodes_rampe
 from libs.poste import PRET, RECENTRAGE, ROTATION, Defaut, Poste
 
-POSTE = cfg.POSTE_FILLE             # le greffon
-AUTRE = cfg.POSTE_MERE
 IDENT_DEG = 5.0                     # étape 2 : amplitude de l'aller-retour
 IDENT_VITESSE_DEG_S = 5.0
 BUTEE_VITESSE_DEG_S = 10.0          # étape 3
@@ -60,9 +60,14 @@ BITS_BUTEES = range(0, 5)           # 0x26 port B : entrées câblées
 # Bit d'ACQUITTEMENT s'il est sur le 0x26 port B : à ne pas prendre pour une butée.
 BIT_ACQUITTEMENT_26B = cfg.BTN_ACQUITTEMENT[2] if cfg.BTN_ACQUITTEMENT[:2] == ("0x26", "B") else None
 
-FICHIER = _commun.fichier_resultat("greffon")
+titre("MISE EN SERVICE D'UN POSTE")
+POSTE = {"m": cfg.POSTE_MERE, "f": cfg.POSTE_FILLE}[menu("Quel poste ?", {"m": "mère", "f": "fille (greffon)"}, "m")]
+AUTRE = cfg.POSTE_FILLE if POSTE == cfg.POSTE_MERE else cfg.POSTE_MERE
+NOM = POSTE.upper()
+
+FICHIER = _commun.fichier_resultat(f"poste_{POSTE}")
 corrections = {}        # constante → texte de la ligne config.py
-journal = [f"TEST GREFFON — poste « {POSTE} » — {time.strftime('%Y-%m-%d %H:%M:%S')}"]
+journal = [f"TEST POSTE — {POSTE} — {time.strftime('%Y-%m-%d %H:%M:%S')}"]
 
 
 def lignes_corrections() -> list:
@@ -82,7 +87,6 @@ def corriger(constante: str, ligne: str) -> None:
     noter(f"    → config.py : {ligne}")
 
 
-titre("TEST GREFFON — POSTE « FILLE » SEUL")
 materiel = _commun.ouvrir(avec_gpio=True)
 ports = PortsDrivers(materiel.drivers)
 entrees = Entrees(materiel.relais, materiel.entrees)
@@ -90,7 +94,7 @@ buzzer = Buzzer(materiel.puce)
 etat = {"axe": None, "poste": None}
 
 
-def butees_greffon() -> list:
+def butees_poste() -> list:
     return [(POSTE, H), (POSTE, A)]
 
 
@@ -123,14 +127,16 @@ def etape_butees_main() -> None:
     repos = repos_stable()
     print(f"    0x26 port B au repos : {bits(repos)}")
     trouves = {}
+    bits_autre = (E.CABLAGE_BUTEES[(AUTRE, H)], E.CABLAGE_BUTEES[(AUTRE, A)])
+    print(f"    (GPB{bits_autre[0]} et GPB{bits_autre[1]} sont à l'autre poste dans config.py : ignorés)")
     for sens in (H, A):
-        print(f"  → Actionne À LA MAIN le galet de la butée {sens.upper()} du greffon "
+        print(f"  → Actionne À LA MAIN le galet de la butée {sens.upper()} du poste {NOM} "
               f"(vue côté opérateur), puis relâche … ", end="", flush=True)
         debut, bit = time.monotonic(), None
         while bit is None and time.monotonic() - debut < ATTENTE_GALET_S:
             octet = repos_stable()
             changes = [b for b in BITS_BUTEES if (octet ^ repos) & (1 << b)
-                       and b not in trouves.values() and b != BIT_ACQUITTEMENT_26B]
+                       and b not in trouves.values() and b not in bits_autre and b != BIT_ACQUITTEMENT_26B]
             if len(changes) == 1:
                 bit = changes[0]
             elif len(changes) > 1:
@@ -151,38 +157,32 @@ def etape_butees_main() -> None:
 
 
 def appliquer_butees(bit_h: int, bit_a: int, origine: str) -> None:
-    """Prend les bits trouvés pour le greffon, et range ceux de l'autre poste sur
-    les bits restants pour que config.py n'ait jamais deux butées sur un bit."""
-    actuel = (getattr(cfg, f"CAP_{POSTE.upper()}_HORAIRE"), getattr(cfg, f"CAP_{POSTE.upper()}_ANTIHORAIRE"))
-    if actuel == (bit_h, bit_a):
-        noter(f"  ✓ butées du greffon conformes à config.py (horaire GPB{bit_h}, antihoraire GPB{bit_a}) "
-              f"[{origine}]")
+    """Prend les bits trouvés pour ce poste. Ceux de l'autre poste ne changent jamais."""
+    constante_h, constante_a = f"CAP_{NOM}_HORAIRE", f"CAP_{NOM}_ANTIHORAIRE"
+    if (getattr(cfg, constante_h), getattr(cfg, constante_a)) == (bit_h, bit_a):
+        noter(f"  ✓ butées conformes à config.py (horaire GPB{bit_h}, antihoraire GPB{bit_a}) [{origine}]")
         return
-    noter(f"  ⚠ butées du greffon différentes de config.py : horaire GPB{bit_h}, antihoraire GPB{bit_a} "
-          f"[{origine}]")
-    libres = [b for b in (1, 2, 3, 4) if b not in (bit_h, bit_a)]
-    valeurs = {f"CAP_{POSTE.upper()}_HORAIRE": bit_h, f"CAP_{POSTE.upper()}_ANTIHORAIRE": bit_a,
-               f"CAP_{AUTRE.upper()}_HORAIRE": libres[0], f"CAP_{AUTRE.upper()}_ANTIHORAIRE": libres[1]}
-    for constante, bit in valeurs.items():
+    noter(f"  ⚠ butées différentes de config.py : horaire GPB{bit_h}, antihoraire GPB{bit_a} [{origine}]")
+    for constante, bit in ((constante_h, bit_h), (constante_a, bit_a)):
         setattr(cfg, constante, bit)
-        suffixe = "   # autre poste : provisoire, non branché" if AUTRE.upper() in constante else ""
-        corriger(constante, f"{constante} = {bit}    # GPB{bit}{suffixe}")
+        corriger(constante, f"{constante} = {bit}    # GPB{bit}")
     E.CABLAGE_BUTEES[(POSTE, H)], E.CABLAGE_BUTEES[(POSTE, A)] = bit_h, bit_a
-    E.CABLAGE_BUTEES[(AUTRE, H)], E.CABLAGE_BUTEES[(AUTRE, A)] = libres[0], libres[1]
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  ÉTAPE 2 — MOTEUR
 # ═══════════════════════════════════════════════════════════════════════════
 
-def tourner(axe: Axe, niveau_dir: int, pas: int, vitesse_deg_s: float, cible: str | None = None) -> tuple:
+def tourner(axe: Axe, niveau_dir: int, pas: int, vitesse_deg_s: float, cible: str | None = None,
+            surveiller: list | None = None) -> tuple:
     """Rotation à vitesse constante (après la rampe), arrêt au budget ou sur la
-    première butée du greffon qui s'active. `cible` : sens de la butée visée ;
-    déjà active au départ → aucun mouvement (jamais contre la butée).
-    Renvoie (pas faits, butée vue, pas à la détection)."""
+    première butée de `surveiller` (celles du poste par défaut) qui s'active.
+    `cible` : sens de la butée visée ; déjà active au départ → aucun mouvement
+    (jamais contre la butée). Renvoie (pas faits, butée vue, pas à la détection)."""
+    surveiller = butees_poste() if surveiller is None else surveiller
     vitesse = vitesse_deg_s * cfg.PAS_PAR_DEGRE
     lire_stable()
-    actives = {cle for cle in butees_greffon() if entrees.butees[cle].stable}
+    actives = {cle for cle in surveiller if entrees.butees[cle].stable}
     if cible is not None and (POSTE, cible) in actives:
         return 0, cible, 0
     axe.lancer_niveau(niveau_dir, pas, periodes_rampe(vitesse), 1.0 / vitesse)
@@ -190,7 +190,7 @@ def tourner(axe: Axe, niveau_dir: int, pas: int, vitesse_deg_s: float, cible: st
     try:
         while axe.en_marche:
             entrees.rafraichir(time.monotonic())
-            for cle in butees_greffon():
+            for cle in surveiller:
                 filtre = entrees.butees[cle]
                 if cle in actives and not filtre.brut:
                     actives.discard(cle)
@@ -220,10 +220,10 @@ def niveau_aller(emplacement: str) -> int:
     """Niveau de DIR de l'aller d'identification. Mandrin en butée au départ : on
     part dans le sens qui s'en ÉLOIGNE, selon config.py (jamais contre la butée)."""
     lire_stable()
-    if entrees.butee(POSTE, H).stable:
+    if entrees.butee(emplacement, H).stable:
         print("    départ sur la butée horaire : l'aller part vers antihoraire")
         return cfg.DIR_VERS_ANTIHORAIRE[emplacement]
-    if entrees.butee(POSTE, A).stable:
+    if entrees.butee(emplacement, A).stable:
         print("    départ sur la butée antihoraire : l'aller part vers horaire")
         return cfg.DIR_VERS_HORAIRE[emplacement]
     return 0
@@ -236,7 +236,11 @@ def etape_moteur() -> None:
     if not confirmer("Mandrin vide, zone dégagée, lancer ?"):
         raise SystemExit("  Non lancé.")
     pas = round(IDENT_DEG * cfg.PAS_PAR_DEGRE)
+    toutes_butees = list(entrees.butees)
     for emplacement in (POSTE, AUTRE):
+        if emplacement == AUTRE and not confirmer(f"Essayer l'autre driver (« {AUTRE} ») ? Son mandrin bougera "
+                                                  f"de {IDENT_DEG:.0f}° s'il est branché"):
+            break
         d = driver(emplacement)
         axe = Axe(emplacement, materiel.puce, d["PUL"], d["DIR"], d["ENA"], ports)
         axe.exciter()
@@ -245,13 +249,13 @@ def etape_moteur() -> None:
             print(f"\n  Driver « {emplacement} » de config.py (PUL {d['PUL']}, DIR GPA{d['DIR']}, "
                   f"ENA GPB{d['ENA']}) : aller…", flush=True)
             aller = niveau_aller(emplacement)
-            faits, vue, _ = tourner(axe, aller, pas, IDENT_VITESSE_DEG_S)
+            faits, vue, _ = tourner(axe, aller, pas, IDENT_VITESSE_DEG_S, surveiller=toutes_butees)
             if vue:
                 print(f"    (arrêt sur la butée {vue})")
             time.sleep(0.5)
             print("    …retour", flush=True)
-            tourner(axe, 1 - aller, faits, IDENT_VITESSE_DEG_S)
-            reponse = menu("Le moteur du greffon a-t-il tourné ?", {"o": "oui", "n": "non", "r": "recommencer"}, "r")
+            tourner(axe, 1 - aller, faits, IDENT_VITESSE_DEG_S, surveiller=[])
+            reponse = menu(f"Le moteur du poste {NOM} a-t-il tourné ?", {"o": "oui", "n": "non", "r": "recommencer"}, "r")
             if reponse != "r":
                 break
         if reponse == "n":
@@ -260,7 +264,7 @@ def etape_moteur() -> None:
         sens = menu("À l'ALLER, dans quel sens est parti le mandrin (vu côté opérateur) ?",
                     {"h": "horaire", "a": "antihoraire"}, "h")
         if emplacement != POSTE:
-            noter(f"  ⚠ Le greffon est branché sur le driver « {emplacement} » de config.py : drivers à échanger")
+            noter(f"  ⚠ Le poste {POSTE} est branché sur le driver « {emplacement} » de config.py : drivers à échanger")
             moi, autre = driver(AUTRE), driver(POSTE)
             for nom, valeur in ((f"PUL_{POSTE.upper()}", moi["PUL"]), (f"DIR_{POSTE.upper()}", moi["DIR"]),
                                 (f"ENA_{POSTE.upper()}", moi["ENA"]), (f"PUL_{AUTRE.upper()}", autre["PUL"]),
@@ -268,7 +272,7 @@ def etape_moteur() -> None:
                 setattr(cfg, nom, valeur)
                 corriger(nom, f"{nom} = {valeur}")
         else:
-            noter(f"  ✓ Le greffon est sur le driver « {POSTE} » de config.py (PUL {d['PUL']})")
+            noter(f"  ✓ Le poste {POSTE} est sur le driver « {POSTE} » de config.py (PUL {d['PUL']})")
         niveau = aller if sens == "h" else 1 - aller
         if niveau == cfg.DIR_VERS_HORAIRE[POSTE]:
             noter(f"  ✓ sens de rotation conforme (DIR vers horaire = {niveau})")
@@ -279,7 +283,7 @@ def etape_moteur() -> None:
                                          f"POSTE_FILLE: {cfg.DIR_VERS_HORAIRE[cfg.POSTE_FILLE]}}}")
         etat["axe"] = construire_axe()
         return
-    noter("  ✗ Le moteur n'a tourné sur aucun des deux drivers : alimentation, LED rouge du driver, "
+    noter("  ✗ Le moteur n'a tourné sur aucun driver essayé : alimentation, LED rouge du driver, "
           "câble moteur, ENA, DIP.")
     raise SystemExit(1)
 
@@ -338,7 +342,7 @@ def construire_poste() -> Poste:
 
 def etape_course(mesures: int | None = None) -> None:
     noter("\n  ÉTAPE 4 — REMISE À ZÉRO ET COURSE TOTALE")
-    if not confirmer("Lancer l'initialisation réelle du greffon ?"):
+    if not confirmer(f"Lancer l'initialisation réelle du poste {NOM} ?"):
         return
     if mesures is None:
         mesures = nombre("Nombre de mesures", MESURES_PAR_DEFAUT)
@@ -377,11 +381,11 @@ def etape_boutons() -> None:
     noter("\n  ÉTAPE 5 — TOURNER AVEC LES BOUTONS")
     poste = construire_poste()
     if poste.etat != PRET:
-        print("  Le greffon doit d'abord être initialisé.")
+        print("  Le poste doit d'abord être initialisé.")
         etape_course(1)
         if poste.etat != PRET:
             return
-    print("  ROTATION + / − du greffon, maintenus : le mandrin tourne. ACQUITTEMENT : retour au centre.")
+    print(f"  ROTATION + / − du poste {NOM}, maintenus : le mandrin tourne. ACQUITTEMENT : retour au centre.")
     print(f"  Fin automatique après {LIBRE_INACTIVITE_S:.0f} s sans rien toucher.\n")
     rotations, derniere_activite = 0, time.monotonic()
     while time.monotonic() - derniere_activite < LIBRE_INACTIVITE_S:

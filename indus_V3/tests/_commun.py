@@ -167,7 +167,7 @@ def tourner(entrees, postes: dict, condition, delai_s: float, quoi: str, buzzer=
             prochain = time.monotonic()
 
 
-def initialiser(entrees, postes: dict, buzzer=None, delai_s: float = 90.0) -> float:
+def initialiser(entrees, postes: dict, buzzer=None, delai_s: float = 150.0) -> float:
     """Initialisation réelle (deux butées en deux passes, puis centrage) des postes donnés.
 
     Un poste déjà initialisé est d'abord remis en attente : sinon ACQUITTEMENT

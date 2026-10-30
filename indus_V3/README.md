@@ -105,11 +105,11 @@ Air comprimé branché, mains hors des lames et des mandrins.
 Avant tout : **régler et vérifier les DIP des drivers** (6400 pas/tr, 4,28 A RMS, demi-courant
 à l'arrêt : `DRIVER_DIP_SWITCH` dans config.py).
 
-**Montage partiel — greffon seul** (un moteur et deux butées branchés, EV non raccordées) :
-`test_greffon.py` fait toute la mise en service du poste fille seul, en 5 étapes : butées à la
+**Un poste à la fois** (un moteur et ses deux butées, EV non raccordées) :
+`test_poste.py` fait toute la mise en service d'un poste au choix (mère ou fille), en 5 étapes : butées à la
 main, moteur (quel driver, sens), butées au moteur, remise à zéro et course totale, puis rotation
 avec les vrais boutons ROTATION ± (ACQUITTEMENT = retour au centre). Récapitulatif dans
-`logs/greffon_*.txt`. Les tests 3, 5, 6, 7 et 8 acceptent aussi un seul poste : le menu demande
+`logs/poste_*.txt`. Les tests 3, 5, 6, 7 et 8 acceptent aussi un seul poste : le menu demande
 quels postes sont branchés (test_5 : répondre « 0 = aucun » pour le driver sans moteur).
 
 Avec les deux postes branchés, `test_5_moteur.py` :
