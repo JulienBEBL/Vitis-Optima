@@ -95,7 +95,7 @@ voir.
 
 ```mermaid
 stateDiagram-v2
-    [*] --> ATTENTE_ACQUITTEMENT : démarrage, sorties à 0, moteurs libres
+    [*] --> ATTENTE_ACQUITTEMENT : démarrage, relais à 0, moteurs excités
     ATTENTE_ACQUITTEMENT --> INITIALISATION : ACQUITTEMENT
     INITIALISATION --> PRET : butées trouvées, mandrin centré
     PRET --> MANOEUVRE_MANDRIN : BRIDAGE
@@ -125,7 +125,7 @@ Sur ACQUITTEMENT, depuis ATTENTE_ACQUITTEMENT ou DEFAUT. Les deux postes s'initi
 
 1. **Ouverture du mandrin** : relais à 0. S'il était fermé ou en manœuvre, attente de
    `TEMPS_MANOEUVRE_MANDRIN_S` avant tout mouvement (la branche ne doit pas être vrillée).
-2. **Excitation du moteur** (ENA ← excité). Il le restera jusqu'à un défaut ou l'arrêt.
+2. **Moteur excité** : il l'est depuis le démarrage du programme et le reste jusqu'à son arrêt.
 3. **Première butée** (sens `INIT_PREMIER_SENS`), en **deux passes** (validé le 2026-10-27) :
    - **passe rapide** à `VITESSE_RECHERCHE_RAPIDE`, rampe en S au démarrage, arrêt sur la
      butée : on la trouve grossièrement. Déjà sur cette butée : passe sautée.
@@ -268,7 +268,7 @@ et MCP, matériel commun) mettent **les deux postes** en défaut.
 **Réaction, pour le poste concerné :**
 1. drapeau d'arrêt sur son thread, attente de sa fin (bornée à 200 ms) ;
 2. **ses deux relais à 0** — mandrin ouvert, lame haute ;
-3. **son moteur libre** (ENA ← libre) ;
+3. **son moteur reste excité** (une remise sous tension décale le rotor) ;
 4. bip très long, journal avec le code et le contexte (position, plage, pas parcourus) ;
 5. état ← DEFAUT.
 

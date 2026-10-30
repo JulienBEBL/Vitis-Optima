@@ -203,8 +203,8 @@ class Poste:
     def neutraliser(self, etat: str = DEFAUT) -> None:
         """Défaut ou arrêt : ordre d'arrêt au moteur, sorties commandées à 0, position oubliée.
 
-        L'attente de fin du thread, l'écriture des relais et de ENA sont faites
-        par machine.py.
+        L'attente de fin du thread et l'écriture des relais sont faites par
+        machine.py. Le moteur reste excité.
         """
         self.axe.demander_arret()
         self.ev_mandrin = False

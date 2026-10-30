@@ -27,7 +27,7 @@ from libs.entrees import ACQUITTEMENT, ACTIONS, ROTATION_MOINS, ROTATION_PLUS, E
 from libs.journal import Compteurs
 from libs.materiel import PORT_A, Buzzer, Materiel
 from libs.moteur import PortsDrivers
-from libs.poste import ATTENTE_ACQUITTEMENT, DEFAUT, DESCRIPTION_DEFAUTS, Defaut, Poste
+from libs.poste import DEFAUT, DESCRIPTION_DEFAUTS, Defaut, Poste
 
 log = logging.getLogger("vitis")
 
@@ -163,11 +163,12 @@ class Machine:
         if octet != self._materiel.relais.image(PORT_A):
             self._materiel.relais.ecrire_port(PORT_A, octet)
 
-        # Avant l'initialisation et en défaut, le moteur du poste est libre.
-        # Retenté à chaque tour si l'écriture du défaut a échoué.
+        # Moteurs TOUJOURS sous tension, dès le premier tour et aussi en défaut :
+        # une remise sous tension décale le rotor. Seul Materiel.fermer() les libère.
+        # Retenté à chaque tour si l'écriture a échoué.
         for poste in self.postes.values():
-            if poste.etat in (ATTENTE_ACQUITTEMENT, DEFAUT) and not poste.axe.libre:
-                poste.axe.liberer()
+            if poste.axe.libre:
+                poste.axe.exciter()
 
     def _verifier_mcp(self, maintenant: float) -> None:
         """D7 : relecture périodique de la configuration des trois MCP."""
@@ -205,7 +206,7 @@ class Machine:
             if not poste.axe.attendre_fin(cfg.ARRET_THREAD_MAX_S):
                 log.error("%s : le thread d'impulsions ne s'arrête pas", poste.nom)
         try:
-            self._ecrire_sorties()          # relais du ou des postes à 0, moteurs libres
+            self._ecrire_sorties()          # relais du ou des postes à 0, moteurs toujours excités
         except OSError as erreur:
             log.error("Sorties non remises en sécurité (%s) — nouvelle tentative à chaque tour", erreur)
         self._buzzer.bip_defaut()

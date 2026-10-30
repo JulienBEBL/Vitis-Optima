@@ -65,7 +65,7 @@ pendant une coupe ou une manœuvre du mandrin, la rotation est refusée.
 | 1 bip long | appui refusé (le motif est dans le journal) |
 | 1 bip très long | défaut |
 
-**En défaut** : le poste en défaut a ses relais à 0 et son moteur libre ; **l'autre poste
+**En défaut** : le poste en défaut a ses relais à 0 et son moteur reste sous tension ; **l'autre poste
 continue**. ACQUITTEMENT relance l'initialisation du poste en défaut.
 
 ---
@@ -137,6 +137,7 @@ vitesse, par le retard de détection ; un décrochage le fait sauter au-delà de
 
 | # | Test | À vérifier | Si c'est faux |
 |---|---|---|---|
+| 15c | `test_10_modes.py` | La machine complète, modes manu, semi-auto et auto, avec EV (à faire après test_4). Sans air d'abord, puis avec air sans branche, puis avec branche en manu et semi-auto | Récapitulatif dans `logs/modes_*.txt` |
 | 15b | `test_9_rotation_libre.py` | Tourner aux boutons (deux postes), réglages modifiables en direct : vitesses, rampes, zone et vitesse d'approche des butées | recopier les réglages proposés |
 | 16 | `test_7_rodage.py` | Les deux moteurs ensemble ; écart de recalage stable ; retard max < 2 ms. Arrêt anticipé : ACQUITTEMENT | courant, rampe, vitesses (test_6) |
 
@@ -157,7 +158,7 @@ vitesse, par le retard de détection ; un décrochage le fait sauter au-delà de
 
 ### 4.5 Cas de défaut — `main.py`
 
-Pour chacun : bip très long ; relais du poste à 0 ; son moteur libre ; ligne `DÉFAUT Dx [poste]`
+Pour chacun : bip très long ; relais du poste à 0 ; son moteur reste sous tension ; ligne `DÉFAUT Dx [poste]`
 dans le journal ; **l'autre poste continue** ; ACQUITTEMENT relance l'initialisation du poste.
 
 | # | Provoquer | Attendu |

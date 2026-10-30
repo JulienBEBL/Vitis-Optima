@@ -9,6 +9,7 @@ y compris sur Ctrl+C.
 """
 
 import logging
+import signal
 import sys
 import time
 from pathlib import Path
@@ -21,6 +22,15 @@ import config as cfg                                      # noqa: E402
 from libs.materiel import Materiel                         # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="  · %(message)s")
+
+
+def _fenetre_fermee(_sig, _frame) -> None:
+    """Fenêtre de Geany fermée : comme Ctrl+C, le `finally` du test remet en sécurité."""
+    raise KeyboardInterrupt
+
+
+if hasattr(signal, "SIGHUP"):
+    signal.signal(signal.SIGHUP, _fenetre_fermee)
 
 
 def titre(texte: str) -> None:
