@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import collections
 import logging
+import os
+import subprocess
 import time
 
 import lgpio
@@ -176,6 +178,23 @@ def verifier_frequence_bus_i2c() -> str | None:
     return (f"bus I2C à {lu}, attendu {cfg.I2C_FREQUENCE_ATTENDUE_HZ / 1000:.0f} kHz : ajouter "
             f"« dtparam=i2c_arm_baudrate={cfg.I2C_FREQUENCE_ATTENDUE_HZ} » dans /boot/firmware/config.txt "
             "puis redémarrer (lecture des butées plus lente sinon)")
+
+
+def autre_programme_actif() -> str | None:
+    """Message si le service tient déjà la machine (et qu'on n'est pas ce service), sinon None.
+
+    Deux programmes sur le même bus se disputeraient relais et moteurs."""
+    if os.environ.get("INVOCATION_ID"):         # posé par systemd : on EST le service
+        return None
+    try:
+        actif = subprocess.run(["systemctl", "is-active", "--quiet", cfg.NOM_SERVICE],
+                               timeout=5).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return None                             # pas de systemd (PC de développement)
+    if not actif:
+        return None
+    return (f"le service {cfg.NOM_SERVICE} pilote déjà la machine. L'arrêter d'abord : "
+            f"sudo systemctl stop {cfg.NOM_SERVICE}")
 
 
 def ouvrir_puce_gpio() -> int:

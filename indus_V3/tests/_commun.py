@@ -40,8 +40,18 @@ def titre(texte: str) -> None:
     print("=" * 64)
 
 
+def _machine_libre() -> None:
+    """Quitte si le service pilote déjà la machine : deux programmes sur le même bus."""
+    from libs.materiel import autre_programme_actif
+    occupe = autre_programme_actif()
+    if occupe:
+        print(f"\n  NON LANCÉ : {occupe}\n")
+        sys.exit(3)
+
+
 def ouvrir(avec_gpio: bool = False) -> Materiel:
     """Vérifie config.py puis ouvre le matériel en état sûr. Quitte en cas d'échec."""
+    _machine_libre()
     try:
         cfg.verifier_config()
     except ValueError as erreur:
@@ -73,6 +83,7 @@ def ouvrir_lecture_seule() -> _LectureSeule:
     et pull-ups). Aucun relais, aucun ENA, aucun GPIO n'est écrit, ni à
     l'ouverture ni à la fermeture."""
     from libs.materiel import BusI2C, Mcp23017
+    _machine_libre()
     try:
         cfg.verifier_config()
         bus = BusI2C(cfg.I2C_BUS_ID)

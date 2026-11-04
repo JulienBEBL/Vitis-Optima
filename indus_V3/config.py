@@ -78,6 +78,10 @@ def sens_oppose(sens: str) -> str:
 
 I2C_BUS_ID = 1               # /dev/i2c-1
 
+# Service systemd qui lance main.py au démarrage (fichier vitis-optima.service).
+# Tant qu'il tourne, main.py et les tests lancés à la main refusent de démarrer.
+NOM_SERVICE = "vitis-optima.service"
+
 # Vitesse du bus, réglée HORS du programme, dans /boot/firmware/config.txt :
 #     dtparam=i2c_arm_baudrate=400000
 # puis redémarrer la Pi. À 400 kHz une lecture des butées prend ≈ 0,15 ms au lieu

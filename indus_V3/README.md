@@ -37,7 +37,28 @@ python3 main.py
 Arrêt : `Ctrl+C`. Toute sortie du programme, y compris sur erreur, remet les relais à 0
 (mandrins ouverts, lames hautes) et les moteurs libres.
 
-Le service systemd n'est pas encore basculé sur ce programme.
+### Lancement automatique au démarrage (service systemd)
+
+Le fichier `vitis-optima.service` lance `main.py` au démarrage de la Pi
+(utilisateur `bebl`, dossier `/home/bebl/Desktop/Vitis-Optima/indus_V3` : à changer dans le
+fichier s'ils changent). Il remplace l'ancien service du même nom (programme `indus/`).
+
+```bash
+cd /home/bebl/Desktop/Vitis-Optima/indus_V3
+sudo systemctl stop vitis-optima.service
+sudo cp vitis-optima.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now vitis-optima.service
+```
+
+Ensuite : `systemctl status vitis-optima.service` (état), `journalctl -u vitis-optima.service -f`
+(journal en direct, aussi dans `logs/vitis_optima.log`), `sudo systemctl restart
+vitis-optima.service` après un `git pull` ou une modification de `config.py`.
+
+**Tests et service ne tournent jamais ensemble** : tant que le service tourne, `main.py` et les
+tests lancés à la main refusent de démarrer. `sudo systemctl stop vitis-optima.service` avant
+les tests, `sudo systemctl start vitis-optima.service` après. Plus de lancement au
+démarrage : `sudo systemctl disable --now vitis-optima.service`.
 
 ## 3. Utilisation
 

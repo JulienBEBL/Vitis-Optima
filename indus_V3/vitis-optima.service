@@ -1,0 +1,70 @@
+# ═══════════════════════════════════════════════════════════════════════
+#  vitis-optima.service — indus V3
+#  Lancement automatique de main.py au démarrage de la Raspberry Pi 5
+# ═══════════════════════════════════════════════════════════════════════
+#
+#  Valeurs de la Pi de la machine (2026-11-04) :
+#      utilisateur        : bebl
+#      dossier du projet  : /home/bebl/Desktop/Vitis-Optima/indus_V3
+#  À changer ici si l'un des deux change (vérifier avec  whoami  et  pwd).
+#
+#  ── INSTALLATION (remplace l'ancien service du même nom) ───────────────
+#      sudo systemctl stop vitis-optima.service      # si un ancien tourne
+#      sudo cp vitis-optima.service /etc/systemd/system/
+#      sudo systemctl daemon-reload
+#      sudo systemctl enable --now vitis-optima.service
+#
+#  ── EXPLOITATION ──────────────────────────────────────────────────────
+#      systemctl status vitis-optima.service          # état du service
+#      journalctl -u vitis-optima.service -f          # journal en direct
+#      sudo systemctl restart vitis-optima.service    # après modif de config.py ou git pull
+#  Journal aussi dans logs/vitis_optima.log.
+#
+#  ── TESTS ─────────────────────────────────────────────────────────────
+#  Tant que le service tourne, il occupe le bus I2C et pilote relais et
+#  moteurs. Les tests et main.py lancés à la main refusent de démarrer :
+#      sudo systemctl stop vitis-optima.service       # avant les tests
+#      sudo systemctl start vitis-optima.service      # après
+#
+#  ── DÉSACTIVATION (plus de lancement au démarrage) ─────────────────────
+#      sudo systemctl disable --now vitis-optima.service
+#
+# ═══════════════════════════════════════════════════════════════════════
+
+[Unit]
+Description=Vitis Optima indus V3 — pilotage des deux postes (mandrins, coupes, rotation)
+Documentation=file:///home/bebl/Desktop/Vitis-Optima/indus_V3/README.md
+
+# /dev/i2c-1 et /dev/gpiochip* sont créés avant multi-user.target. Si le bus
+# n'était malgré tout pas prêt, Restart=on-failure rattrape le coup.
+After=multi-user.target
+
+[Service]
+Type=simple
+
+# Accès à /dev/i2c-1 et à /dev/gpiochip* sans être root.
+User=bebl
+SupplementaryGroups=i2c gpio
+
+WorkingDirectory=/home/bebl/Desktop/Vitis-Optima/indus_V3
+ExecStart=/usr/bin/python3 /home/bebl/Desktop/Vitis-Optima/indus_V3/main.py
+
+# Sinon la sortie est bufferisée par blocs de 4 ko et arrive en retard dans journalctl.
+Environment=PYTHONUNBUFFERED=1
+
+# Redémarrage si le programme s'arrête sur une erreur (bus I2C, exception).
+# Pas sur une erreur de config.py (code 2) ni sur un autre programme qui tient
+# déjà la machine (code 3) : relancer n'y changerait rien.
+Restart=on-failure
+RestartSec=5
+RestartPreventExitStatus=2 3
+
+# À l'arrêt, systemd envoie SIGTERM : main.py remet relais et moteurs en sécurité.
+KillSignal=SIGTERM
+TimeoutStopSec=10
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

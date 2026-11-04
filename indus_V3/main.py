@@ -4,6 +4,7 @@
 main.py — Point d'entrée de la Vitis Optima indus V3.
 
     Lancement :  python3 main.py
+    Service :    vitis-optima.service (lancement au démarrage, voir README § 2)
     Arrêt :      Ctrl+C, fermeture de la fenêtre (Geany), ou systemctl stop
 
 La logique est décrite dans LOGIQUE.md, les paramètres sont dans config.py.
@@ -26,7 +27,7 @@ import config as cfg
 from libs.entrees import Entrees
 from libs.journal import Compteurs, configurer_journal
 from libs.machine import Machine
-from libs.materiel import Buzzer, Materiel, verifier_frequence_bus_i2c
+from libs.materiel import Buzzer, Materiel, autre_programme_actif, verifier_frequence_bus_i2c
 from libs.moteur import Axe, PortsDrivers
 from libs.poste import Poste
 
@@ -122,6 +123,10 @@ def main() -> int:
     except ValueError as erreur:
         print(f"ERREUR DE CONFIGURATION : {erreur}", file=sys.stderr, flush=True)
         return 2
+    occupe = autre_programme_actif()
+    if occupe:
+        print(f"NON LANCÉ : {occupe}", file=sys.stderr, flush=True)
+        return 3
 
     log = configurer_journal()
     log.info("═══ Démarrage Vitis Optima indus V3 ═══")
