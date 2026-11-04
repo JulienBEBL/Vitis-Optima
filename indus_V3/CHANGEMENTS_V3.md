@@ -82,6 +82,7 @@ validée avant la suivante.
 | 2026-10-30 | Choix sur machine (test_9) : croisière de rotation 20°/s (était 10), rampes de 2 s (étaient 1 s). |
 | 2026-10-30 | Passe rapide d'initialisation : 40°/s (était 20), choix sur machine. Rodage sur les deux postes (40 trajets à 10°/s, rampe 1 s) : 0 raté, écart max ±0,17°. |
 | 2026-10-30 | Décision de Julien : moteurs toujours sous tension, y compris avant l'initialisation et en défaut (libérés seulement à la sortie du programme). test_10_modes.py : machine complète en manu, semi-auto et auto. Fermer la fenêtre de Geany pendant un test remet aussi en sécurité. |
+| 2026-11-04 | Mécanique et pneumatique complets. EV attribuées (test_4) : mandrin mère GPA3, coupe mère GPA4, mandrin fille GPA2, coupe fille GPA5. |
 | 2026-10-30 | main.py : fermer la fenêtre de Geany (SIGHUP) passe maintenant par le chemin d'arrêt normal, relais à 0 et moteurs libres. Le journal note le retard max des impulsions à l'arrêt. |
 | 2026-10-28 | Tests lancés depuis Geany (F5) : menus au clavier au lieu des options en ligne de commande. test_5 réécrit en mise en service (moteur ↔ poste, sens, butées, remise à zéro, course), test_6 devient le réglage des vitesses et rampes (recherche vitesse max et rampe min). |
 | 2026-10-28 | Tests utilisables depuis Geany : plus besoin de Ctrl+C (qui ferme la fenêtre), résultats enregistrés dans logs/. |

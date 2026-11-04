@@ -38,7 +38,7 @@ Seuls les drivers 1 (poste mère) et 2 (poste fille) sont utilisés.
 ═══════════════════════════════════════════════════════════════════════════════
  VALEURS NON CONFIRMÉES — à vérifier avec les scripts de tests/ (voir README.md)
 ═══════════════════════════════════════════════════════════════════════════════
-  ⚠ À ATTRIBUER   EV_* ................. relais ↔ EV                     (test_4)
+  ✓ ATTRIBUÉ     EV_* ................. relais ↔ EV (test_4, 2026-11-04)
                   CAP_* ................ butée ↔ bit, sens               (test_3)
                   DIR_VERS_HORAIRE ..... sens de rotation par poste      (test_5)
                   SENS_ROTATION_PLUS ... sens du bouton ROTATION +       (test_5)
@@ -146,13 +146,13 @@ GPIO_RELAIS_LIBRES = (16, 20)
 #
 # ⚠ Les 6 relais du PCB sont câblés sur A2..A7 : A0 et A1 NE SORTENT NULLE PART
 #   (V4 CLAUDE.md « LED1→A2 … LED6→A7 »). verifier_config() refuse A0/A1.
-# ⚠ ATTRIBUTION À REFAIRE (test_4_relais.py). Valeurs de départ = relevé V2 du
-#   2026-10-13, l'ancien bridage devenant le mandrin.
+# Attribution relevée sur machine le 2026-11-04 (test_4_relais.py), sens vérifié :
+#   relais activé = mandrin fermé, lame descendue.
 
-EV_COUPE_FILLE = 2       # GPA2 — relais 1   ⚠ à attribuer
-EV_COUPE_MERE = 3        # GPA3 — relais 2   ⚠ à attribuer
-EV_MANDRIN_MERE = 4      # GPA4 — relais 3   ⚠ à attribuer
-EV_MANDRIN_FILLE = 5     # GPA5 — relais 4   ⚠ à attribuer
+EV_MANDRIN_FILLE = 2     # GPA2 — relais 1   relevé le 2026-11-04
+EV_MANDRIN_MERE = 3      # GPA3 — relais 2   relevé le 2026-11-04
+EV_COUPE_MERE = 4        # GPA4 — relais 3   relevé le 2026-11-04
+EV_COUPE_FILLE = 5       # GPA5 — relais 4   relevé le 2026-11-04
 # GPA6 (relais 5) et GPA7 (relais 6) : libres, maintenus à 0.
 
 
