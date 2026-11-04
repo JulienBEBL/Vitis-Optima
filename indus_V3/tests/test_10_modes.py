@@ -40,6 +40,7 @@ Fin : RÉCAPITULATIF, ENREGISTRÉ dans logs/modes_<date>_<heure>.txt. Moteurs so
 tension pendant tout le test, libérés seulement à la sortie du programme.
 """
 
+import logging
 import sys
 import time
 from pathlib import Path
@@ -106,7 +107,22 @@ if mode != MANU:
     cycles = nombre("Nombre de cycles", CYCLES_PAR_DEFAUT)
 
 materiel = _commun.ouvrir(avec_gpio=True)
-configurer_journal()
+
+
+class _SurLigneEffacee(logging.Formatter):
+    """Le journal efface d'abord la ligne d'état (écrite avec \\r), sinon il s'écrit à sa suite."""
+
+    def __init__(self, format_: logging.Formatter) -> None:
+        super().__init__()
+        self._format = format_
+
+    def format(self, record: logging.LogRecord) -> str:
+        return "\r" + " " * 76 + "\r" + self._format.format(record)
+
+
+for _console in configurer_journal().handlers:
+    if type(_console) is logging.StreamHandler:
+        _console.setFormatter(_SurLigneEffacee(_console.formatter))
 sys.setswitchinterval(cfg.PYTHON_SWITCH_INTERVAL_S)
 compteurs = Compteurs()
 machine = programme._construire_machine(materiel, compteurs=compteurs)
