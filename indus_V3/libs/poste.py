@@ -3,7 +3,7 @@
 poste.py — Machine à états d'un poste (mère ou fille). LOGIQUE.md § 3 à § 6.
 
 Un poste possède son mandrin, sa coupe et son moteur de rotation. Il applique
-ses interlocks (I1 à I5) et détecte ses défauts (D1, D2, D4, D5, D8, D9). Il ne
+ses interlocks (I1 à I6) et détecte ses défauts (D1, D2, D4, D5, D8, D9). Il ne
 connaît PAS l'autre poste : en V3 les deux postes sont totalement
 indépendants. machine.py ne fait que lui transmettre les appuis.
 
@@ -109,6 +109,11 @@ class Poste:
         self._repos_ref = None      # D5 à l'arrêt : état des butées au début du repos
         self._repos_ecart_depuis = None
         self.dernier_ecart_recalage: int | None = None   # lu par le rodage (test_7)
+        # Motif qui interdit toute nouvelle initialisation (I6) : le moteur a vu la
+        # butée OPPOSÉE, ou a traversé une butée. Le sens ou les butées ne sont plus
+        # sûrs : réinitialiser pousserait le mandrin au-delà de son capteur, d'où il
+        # ne peut pas revenir. Effacé seulement en relançant le programme.
+        self.init_bloquee: str | None = None
 
     # ── Lecture de l'état ─────────────────────────────────────────────────
 
@@ -160,6 +165,10 @@ class Poste:
     def refus_acquittement(self, maintenant: float) -> str | None:
         """ACQUITTEMENT : initialisation hors marche, recentrage en PRET, refusé sinon."""
         if self.etat in (ATTENTE_ACQUITTEMENT, DEFAUT):
+            if self.init_bloquee:
+                return (f"I6 — initialisation bloquée : {self.init_bloquee}. Vérifier le sens du moteur "
+                        "et les butées (test_poste), remettre le mandrin entre ses butées, puis relancer "
+                        "le programme")
             return None
         if self.etat != PRET:
             return f"I2 — poste occupé ({self.etat})"
@@ -367,13 +376,15 @@ class Poste:
         if self._phase == "ouverture":
             if maintenant >= self._echeance:
                 self.mandrin_ferme = False
-                self._passe_rapide()
+                self._depart_initialisation()
             return
         fin = self._avancer_mouvement(maintenant)
         if fin is None:
             return
         sens = self._cotes[self._cote]
-        if self._phase == "rapide":
+        if self._phase == "degagement":
+            self._passe_rapide()
+        elif self._phase == "rapide":
             self.detection_rapide[sens] = fin["detection"]
             self._recul(sens)
         elif self._phase == "recul":
@@ -406,18 +417,36 @@ class Poste:
                        f"initialisé — plage {self.degres(self.plage)} ({self.plage} pas), "
                        f"mandrin centré à {self.degres(self.position)}")
 
+    def _depart_initialisation(self) -> None:
+        """Avant tout mouvement, les butées sont LUES. Mandrin déjà sur la butée du
+        second côté : il la quitte d'abord, lentement, dans le sens opposé (jamais plus
+        loin dedans), puis la recherche commence. Sur la butée du premier côté : la
+        passe rapide est sautée (_passe_rapide)."""
+        actives = [s for s in cfg.SENS if self._butees[s].stable or self._butees[s].brut]
+        if len(actives) == 2:
+            raise Defaut("D2", f"{self.nom} : butées horaire ET antihoraire actives au départ")
+        if actives and actives[0] != self._cotes[0]:
+            log.info("%s : départ sur la butée %s — dégagement lent vers %s", self.nom, actives[0],
+                     self._cotes[0])
+            self._phase = "degagement"
+            self._demarrer(self._cotes[0], _DEGAGEMENT, cfg.DEGAGEMENT_MAX_PAS + cfg.RECUL_CONFIRMATION_PAS,
+                           (), 1.0 / cfg.VITESSE_RECHERCHE_LENTE_SPS, code_budget="D4", code_inattendu="D8")
+            return
+        self._passe_rapide()
+
     def _passe_rapide(self) -> None:
         sens = self._cotes[self._cote]
         self._phase = "rapide"
-        if self._butees[sens].stable:
+        if self._butees[sens].stable or self._butees[sens].brut:
             log.info("%s : déjà sur la butée %s", self.nom, sens)
             self.detection_rapide[sens] = None
             self._recul(sens)
             return
         if self._cote == 0:
-            # Première butée : position inconnue, pas de ralentissement possible.
-            periodes = periodes_rampe(cfg.VITESSE_RECHERCHE_RAPIDE_SPS)
-            suite = 1.0 / cfg.VITESSE_RECHERCHE_RAPIDE_SPS
+            # Première butée : position inconnue, pas de ralentissement possible. Le
+            # mandrin arrive sur le galet à pleine vitesse : vitesse modérée.
+            periodes = periodes_rampe(cfg.VITESSE_PREMIERE_BUTEE_SPS)
+            suite = 1.0 / cfg.VITESSE_PREMIERE_BUTEE_SPS
         else:
             # Seconde butée : à une plage de la première. On ralentit dès la plage
             # nominale moins sa tolérance, pour arriver lentement même si la plage
@@ -433,12 +462,13 @@ class Poste:
         Le recul est compté depuis le RELÂCHEMENT de la butée, pas depuis le
         départ : après un D1, le mandrin peut être jusqu'à la marge derrière sa
         butée, et un recul fixe ne suffirait pas à la relâcher (trouvé sur banc
-        logiciel). Avant le relâchement, D4 borne le mouvement.
+        logiciel). Avant le relâchement, D4 borne le mouvement. Lent, sans rampe :
+        on part d'un galet enfoncé.
         """
         self._phase = "recul"
         self._demarrer(cfg.sens_oppose(sens), _DEGAGEMENT,
                        cfg.DEGAGEMENT_MAX_PAS + cfg.RECUL_CONFIRMATION_PAS,
-                       periodes_rampe(cfg.VITESSE_RECENTRAGE_SPS), 1.0 / cfg.VITESSE_RECENTRAGE_SPS,
+                       (), 1.0 / cfg.VITESSE_RECHERCHE_LENTE_SPS,
                        code_budget="D4", code_inattendu="D8")
 
     def _fin_mesure(self, maintenant: float) -> None:
@@ -489,6 +519,7 @@ class Poste:
             raise Defaut("D4", f"{self.nom} : butée {oppose} toujours active après {self.axe.pas} pas")
         if m["depart"] is None and autre.consecutifs >= cfg.CAPTEUR_LECTURES_ARRET:
             self.axe.demander_arret()
+            self.init_bloquee = f"butée {oppose} vue en tournant vers {sens}"
             raise Defaut(m["code_inattendu"], f"{self.nom} : butée {oppose} vue en tournant vers {sens} "
                                               "(sens de rotation ou attribution des butées à vérifier)")
 
@@ -526,6 +557,8 @@ class Poste:
         if m["raison"] == _SUR_BUTEE and not cible.stable:
             # Confirmation de l'arrivée par le signal stable.
             if maintenant - m["arret_a"] > cfg.CONFIRMATION_CAPTEUR_MAX_S:
+                # Vue puis perdue : le mandrin a pu traverser la butée.
+                self.init_bloquee = f"butée {sens} vue puis perdue (dépassée ?)"
                 raise Defaut("D5", f"{self.nom} : butée {sens} vue puis non confirmée")
             return None
         self._pos = self._position_courante()

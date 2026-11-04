@@ -189,6 +189,10 @@ def initialiser(entrees, postes: dict, buzzer=None, delai_s: float = 150.0) -> f
         entrees.rafraichir(time.monotonic())
         time.sleep(cfg.PERIODE_BOUCLE_S)
     for poste in postes.values():
+        if poste.init_bloquee:
+            # I6 : jamais de nouvelle initialisation après une butée opposée ou traversée.
+            raise RuntimeError(f"{poste.nom} : initialisation bloquée — {poste.init_bloquee}. Vérifier le "
+                               "sens et les butées (test_poste), mandrin entre ses butées, puis relancer")
         if poste.etat != ATTENTE_ACQUITTEMENT:
             poste.neutraliser(ATTENTE_ACQUITTEMENT)
             poste.axe.attendre_fin(cfg.ARRET_THREAD_MAX_S)

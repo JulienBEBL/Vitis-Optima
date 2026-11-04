@@ -49,8 +49,9 @@ def _afficher_config(log):
     log.info("    rotation : démarrage %.1f°/s, croisière %.1f°/s (%.0f pas/s) ; recentrage %.1f°/s",
              cfg.VITESSE_DEMARRAGE_DEG_S, cfg.VITESSE_CROISIERE_DEG_S, cfg.VITESSE_CROISIERE_SPS,
              cfg.VITESSE_RECENTRAGE_DEG_S)
-    log.info("    initialisation : passe rapide %.1f°/s, recul %.1f°, passe lente %.1f°/s, "
-             "premier sens %s", cfg.VITESSE_RECHERCHE_RAPIDE_DEG_S, cfg.RECUL_CONFIRMATION_DEG,
+    log.info("    initialisation : 1re butée %.1f°/s, 2e %.1f°/s, recul %.1f°, passe lente %.1f°/s, "
+             "premier sens %s", cfg.VITESSE_PREMIERE_BUTEE_DEG_S, cfg.VITESSE_RECHERCHE_RAPIDE_DEG_S,
+             cfg.RECUL_CONFIRMATION_DEG,
              cfg.VITESSE_RECHERCHE_LENTE_DEG_S, cfg.INIT_PREMIER_SENS)
     for poste in cfg.POSTES:
         log.info("    %s : plage nominale %.1f° ± %.1f°, DIR vers horaire = %d, ROTATION + = %s",

@@ -126,11 +126,16 @@ Sur ACQUITTEMENT, depuis ATTENTE_ACQUITTEMENT ou DEFAUT. Les deux postes s'initi
 1. **Ouverture du mandrin** : relais à 0. S'il était fermé ou en manœuvre, attente de
    `TEMPS_MANOEUVRE_MANDRIN_S` avant tout mouvement (la branche ne doit pas être vrillée).
 2. **Moteur excité** : il l'est depuis le démarrage du programme et le reste jusqu'à son arrêt.
+2b. **Lecture des butées avant tout mouvement** (2026-11-04). Mandrin déjà sur la butée du
+   second côté : il la **quitte lentement** (`VITESSE_RECHERCHE_LENTE`), dans le sens opposé,
+   puis recule encore de `RECUL_CONFIRMATION_DEG` ; jamais plus loin dedans. Les deux
+   butées actives : **D2**.
 3. **Première butée** (sens `INIT_PREMIER_SENS`), en **deux passes** (validé le 2026-10-27) :
-   - **passe rapide** à `VITESSE_RECHERCHE_RAPIDE`, rampe en S au démarrage, arrêt sur la
+   - **passe rapide** à `VITESSE_PREMIERE_BUTEE` (position inconnue, pas de ralentissement
+     possible : vitesse modérée), rampe en S au démarrage, arrêt sur la
      butée : on la trouve grossièrement. Déjà sur cette butée : passe sautée.
      Budget : plage nominale + marge → sinon **D8** ;
-   - **recul** : le moteur quitte la butée, puis recule encore de `RECUL_CONFIRMATION_DEG`
+   - **recul**, lent et sans rampe : le moteur quitte la butée, puis recule encore de `RECUL_CONFIRMATION_DEG`
      **compté depuis le relâchement** du galet. Butée toujours active après
      `DEGAGEMENT_MAX_DEG` → **D4**. (Trouvé sur banc logiciel : après un D1, le mandrin peut
      être jusqu'à la marge derrière sa butée, un recul fixe de 5° ne la relâchait pas.) ;
@@ -139,8 +144,9 @@ Sur ACQUITTEMENT, depuis ATTENTE_ACQUITTEMENT ou DEFAUT. Les deux postes s'initi
      **C'est cet arrêt lent qui fixe la position 0** (ou `plage`).
      La tolérance couvre l'**hystérésis** du galet (il se relâche avant le point où il
      s'enclenche) : 10°, après un D8 sur machine avec 3°.
-4. **Seconde butée**, sens opposé, mêmes trois temps. La position de l'arrêt lent **est la
-   plage mesurée**.
+4. **Seconde butée**, sens opposé, mêmes trois temps, passe rapide à
+   `VITESSE_RECHERCHE_RAPIDE` avec ralentissement avant la butée. La position de l'arrêt
+   lent **est la plage mesurée**.
 5. **Contrôle de la plage** : écart à `PLAGE_NOMINALE_DEG` supérieur à
    `PLAGE_TOLERANCE_DEG` → **D9**.
 6. **Centrage** : mouvement jusqu'à la moitié de la plage mesurée (§ 8.3), à
@@ -246,13 +252,21 @@ de refus +1, bip long, ligne de journal avec le motif.
 | **I3** | **Pas de coupe mandrin ouvert** | mandrin == FERME | COUPE |
 | **I4** | Pas de rotation vers une butée déjà atteinte | la butée dans le sens demandé n'est pas active | ROTATION ± |
 | **I5** | Un seul sens à la fois | l'autre bouton de rotation du poste est relâché | ROTATION ± |
+| **I6** | Pas de réinitialisation à l'aveugle | aucune butée opposée vue ni butée traversée depuis le lancement du programme | ACQUITTEMENT en ATTENTE ou DEFAUT |
+
+I6 (2026-11-04) : une butée **opposée** vue en tournant (D8 / D5) ou une butée vue puis
+perdue (D5) veut dire que le sens du moteur ou les butées ne sont plus sûrs, ou que le
+mandrin est passé de l'autre côté d'un capteur. Une nouvelle initialisation le pousserait
+au-delà du capteur, d'où il ne peut pas revenir (forme du galet). Le poste reste en
+DÉFAUT ; on vérifie (test_poste), on remet le mandrin entre ses butées, on relance le
+programme.
 
 I2 porte la règle « **un poste fait une chose à la fois** » : en ROTATION, BRIDAGE et COUPE
 sont refusés ; en COUPE et MANOEUVRE_MANDRIN, la rotation est refusée.
 
 I3 est **par poste** : mandrin fille ouvert → coupe fille refusée, coupe mère inchangée.
 
-ACQUITTEMENT n'est jamais refusé en ATTENTE_ACQUITTEMENT ou en DEFAUT : c'est la seule
+ACQUITTEMENT n'est refusé en ATTENTE_ACQUITTEMENT ou en DEFAUT que par I6 : c'est la seule
 sortie. En marche, il est refusé pour un poste occupé (I2), accepté pour l'autre.
 
 Un bouton tenu pendant une action ne fait rien à la fin de l'action : seul un **nouveau

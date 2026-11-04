@@ -362,7 +362,13 @@ MOTEUR_RAMPES_EN_S = True
 VITESSE_RECHERCHE_RAPIDE_DEG_S = 40.0   # choisi le 2026-10-30 — les deux moteurs ensemble = 1422 pas/s,
                                         # au-dessus des 600 pas/s tenus par un thread en V2 :
                                         # surveiller le « retard max » du journal aux essais
-VITESSE_RECHERCHE_LENTE_DEG_S = 3.0     # ⚠ À AJUSTER — arrêt en moins de 0,03° sur la butée
+# Passe rapide vers la PREMIÈRE butée : la position est encore inconnue, le mandrin
+# ne peut pas ralentir et arrive sur le galet à cette vitesse. Plus bas que la passe
+# rapide (2026-11-04) : un mandrin qui traverse son capteur ne peut plus revenir.
+# La seconde butée (plage connue) garde VITESSE_RECHERCHE_RAPIDE, avec ralentissement.
+VITESSE_PREMIERE_BUTEE_DEG_S = 20.0
+VITESSE_RECHERCHE_LENTE_DEG_S = 3.0     # ⚠ À AJUSTER — arrêt en moins de 0,03° sur la butée ;
+                                        # aussi la vitesse pour QUITTER une butée (recul)
 RECUL_CONFIRMATION_DEG = 5.0            # recul après la passe rapide : doit relâcher le galet
 TOLERANCE_CONFIRMATION_DEG = 10.0       # la passe lente doit retrouver la butée dans
                                         # RECUL + cette tolérance, sinon défaut D8. Couvre
@@ -396,6 +402,7 @@ def _pas(degres: float) -> int:
 VITESSE_CROISIERE_SPS = VITESSE_CROISIERE_DEG_S * PAS_PAR_DEGRE
 VITESSE_DEMARRAGE_SPS = VITESSE_DEMARRAGE_DEG_S * PAS_PAR_DEGRE
 VITESSE_RECHERCHE_RAPIDE_SPS = VITESSE_RECHERCHE_RAPIDE_DEG_S * PAS_PAR_DEGRE
+VITESSE_PREMIERE_BUTEE_SPS = VITESSE_PREMIERE_BUTEE_DEG_S * PAS_PAR_DEGRE
 VITESSE_RECHERCHE_LENTE_SPS = VITESSE_RECHERCHE_LENTE_DEG_S * PAS_PAR_DEGRE
 VITESSE_RECENTRAGE_SPS = VITESSE_RECENTRAGE_DEG_S * PAS_PAR_DEGRE
 VITESSE_APPROCHE_BUTEE_SPS = VITESSE_APPROCHE_BUTEE_DEG_S * PAS_PAR_DEGRE
@@ -676,7 +683,10 @@ def verifier_config() -> None:
         erreurs.append("VITESSE_DEMARRAGE_DEG_S doit être < VITESSE_CROISIERE_DEG_S")
     if not VITESSE_RECHERCHE_LENTE_DEG_S < VITESSE_RECHERCHE_RAPIDE_DEG_S:
         erreurs.append("VITESSE_RECHERCHE_LENTE_DEG_S doit être < VITESSE_RECHERCHE_RAPIDE_DEG_S")
+    if not VITESSE_RECHERCHE_LENTE_DEG_S < VITESSE_PREMIERE_BUTEE_DEG_S <= VITESSE_RECHERCHE_RAPIDE_DEG_S:
+        erreurs.append("VITESSE_PREMIERE_BUTEE_DEG_S doit être entre la passe lente et la passe rapide")
     for nom, vitesse in (("VITESSE_RECHERCHE_RAPIDE_DEG_S", VITESSE_RECHERCHE_RAPIDE_DEG_S),
+                         ("VITESSE_PREMIERE_BUTEE_DEG_S", VITESSE_PREMIERE_BUTEE_DEG_S),
                          ("VITESSE_RECENTRAGE_DEG_S", VITESSE_RECENTRAGE_DEG_S)):
         if vitesse <= VITESSE_DEMARRAGE_DEG_S:
             erreurs.append(f"{nom} doit être > VITESSE_DEMARRAGE_DEG_S (la rampe part de là)")
