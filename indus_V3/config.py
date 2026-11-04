@@ -201,12 +201,12 @@ ANTI_REBOND_BOUTON_S = 0.05
 # bits datent du même instant — le contrôle « deux butées actives » (D2) porte
 # sur une photo cohérente.
 # Greffon (fille) : relevé sur machine le 2026-10-28 (test_3, attribution), contacts NO.
-# Mère : relevé sur machine le 2026-10-30 (test_poste), contacts NO.
+# Mère : relevé sur machine le 2026-11-04 après remontage (test_poste), contacts NO.
 
 CAP_FILLE_HORAIRE = 1        # GPB1   relevé le 2026-10-28
 CAP_FILLE_ANTIHORAIRE = 4    # GPB4   relevé le 2026-10-28
-CAP_MERE_HORAIRE = 3         # GPB3   relevé le 2026-10-30
-CAP_MERE_ANTIHORAIRE = 2     # GPB2   relevé le 2026-10-30
+CAP_MERE_HORAIRE = 2         # GPB2   relevé le 2026-11-04 (inversé au remontage)
+CAP_MERE_ANTIHORAIRE = 3     # GPB3   relevé le 2026-11-04 (inversé au remontage)
 
 # Contact NO + pull-up : galet actionné = contact fermé = niveau BAS.
 # Fil coupé ou connecteur débranché = niveau HAUT = « pas en butée » :
@@ -298,8 +298,8 @@ PAS_PAR_DEGRE = DRIVER_PAS_PAR_TOUR / 360.0
 # Mesurée à chaque initialisation ; la valeur mesurée est comparée à celle-ci.
 # ⚠ À MESURER (test_5_moteur.py, étape 3) — à reprendre à chaque déplacement d'un capteur.
 # Fille : 281,1° mesuré le 2026-10-28 (test_5 étape 3, 5 mesures, dispersion 0,11°).
-# Mère : 281,1° mesuré le 2026-10-30 (test_poste étape 4, 3 mesures, dispersion 0,11°).
-PLAGE_NOMINALE_DEG = {POSTE_MERE: 281.1, POSTE_FILLE: 281.1}
+# Mère : 283,2° mesuré le 2026-11-04 après remontage (test_poste étape 4, 3 mesures, dispersion 0,11°).
+PLAGE_NOMINALE_DEG = {POSTE_MERE: 283.2, POSTE_FILLE: 281.1}
 
 # Écart toléré entre plage mesurée et plage nominale. Au-delà → défaut D9.
 PLAGE_TOLERANCE_DEG = 15.0
