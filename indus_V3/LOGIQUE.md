@@ -21,7 +21,7 @@ de l'autre. Chacun possède :
 - une **coupe** (EV 1 bobine) — descend la lame puis la remonte ;
 - un **moteur** NEMA 24 (StepperOnline 24IP65-30, driver JK-DM860H), arbre parallèle au
   sol, qui fait **tourner le mandrin** entre deux butées, **HORAIRE** et **ANTIHORAIRE**,
-  chacune matérialisée par une fin de course. Plage ≈ 281° (fille mesurée, mère ⚠ théorique) ;
+  chacune matérialisée par une fin de course. Plage mesurée : 281,1° fille, 283,2° mère (2026-11-04) ;
 - un **guide de translation** sur lequel l'opérateur avance et recule le bloc moteur **à
   la main**. Aucun capteur : le logiciel ne connaît pas la position du bloc.
 

@@ -9,8 +9,8 @@ qui fait tourner le mandrin entre deux butées. Raspberry Pi 5, Python 3.11+.
 - **CHANGEMENTS_V3.md** — ce qui a changé depuis la V2, et pourquoi.
 - **main.py** — le programme.
 
-> **V3 codée, pas encore essayée sur la machine.** Vérifiée sur banc logiciel (faux
-> matériel, hors dépôt). Faire la procédure du § 4 dans l'ordre avant tout usage.
+> **V3 validée sur machine le 2026-11-04** (deux postes, test_10), après vérification sur banc
+> logiciel (faux matériel, hors dépôt). Après un remontage, refaire la procédure du § 4 dans l'ordre.
 
 ---
 
@@ -123,8 +123,8 @@ Air comprimé branché, mains hors des lames et des mandrins.
 
 ### 4.3 Moteurs — mandrins vides
 
-Avant tout : **régler et vérifier les DIP des drivers** (6400 pas/tr, 4,28 A RMS, demi-courant
-à l'arrêt : `DRIVER_DIP_SWITCH` dans config.py).
+Avant tout : **régler et vérifier les DIP des drivers** (6400 pas/tr, 4,28 A RMS, plein courant
+à l'arrêt, SW4 = ON : `DRIVER_DIP_SWITCH` dans config.py).
 
 **Un poste à la fois** (un moteur et ses deux butées, EV non raccordées) :
 `test_poste.py` fait toute la mise en service d'un poste au choix (mère ou fille), en 5 étapes : butées à la

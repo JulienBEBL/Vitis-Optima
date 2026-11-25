@@ -165,4 +165,4 @@ Toutes tranchées le 2026-10-27 (voir § 3).
 - [x] 2026-10-27 — code (`main.py`, `libs/`) écrit et vérifié sur banc logiciel (45 vérifications)
 - [x] 2026-10-27 — scripts de test 1 à 8 adaptés ; 1, 4, 6, 7, 8 et `main.py` exécutés sur banc logiciel
 - [x] 2026-10-27 — README réécrit pour la V3
-- [ ] Essais machine
+- [x] 2026-11-04 — essais machine : deux postes validés (test_10)
